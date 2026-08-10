@@ -41,8 +41,7 @@ flutter_launcher_icons:
   ios: true
   image_path: "assets/logo/app_logo.png"
   min_sdk_android: 21
-  # CHANGE THIS LINE FROM "#FFFFFF" to your Teal Green hex code:
-  adaptive_icon_background: "#166B50"
+  adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/logo/app_logo.png"
   remove_alpha_ios: true
 
