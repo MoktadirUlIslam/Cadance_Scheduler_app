@@ -349,7 +349,7 @@ class CustomDrawer extends StatelessWidget {
     );
 
     if (shouldLogout == true && context.mounted) {
-      await context.read<AuthProvider>().signOut();
+      await context.read<UserAuthProvider >().signOut();
 
       if (context.mounted) {
         Navigator.pushAndRemoveUntil(

@@ -100,7 +100,7 @@ class _SignupScreenState extends State<SignupScreen>
   Future<void> _handleSignUp() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final authProvider = context.read<AuthProvider>();
+    final authProvider = context.read<UserAuthProvider >();
     final success = await authProvider.signUp(
       username: _usernameController.text.trim(),
       email: _emailController.text.trim(),
@@ -305,7 +305,7 @@ class _SignupScreenState extends State<SignupScreen>
                                     },
                                   ),
                                   const SizedBox(height: 6),
-                                  Consumer<AuthProvider>(
+                                  Consumer<UserAuthProvider >(
                                     builder: (context, auth, child) {
                                       return CadencePrimaryButton(
                                         label: 'Sign up',

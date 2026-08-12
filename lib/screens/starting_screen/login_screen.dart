@@ -97,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen>
   Future<void> _handleSignIn() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final authProvider = context.read<AuthProvider>();
+    final authProvider = context.read<UserAuthProvider>();
     final success = await authProvider.signIn(
       email: _emailController.text.trim(),
       password: _passwordController.text,
@@ -307,7 +307,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     ),
                                   ),
                                   const SizedBox(height: 16),
-                                  Consumer<AuthProvider>(
+                                  Consumer<UserAuthProvider>(
                                     builder: (context, auth, child) {
                                       return CadencePrimaryButton(
                                         label: 'Sign in',
@@ -384,7 +384,7 @@ class _LoginScreenState extends State<LoginScreen>
           ),
           TextButton(
             onPressed: () async {
-              final authProvider = context.read<AuthProvider>();
+              final authProvider = context.read<UserAuthProvider>();
               final email = emailController.text.trim();
 
               if (email.isEmpty || !email.contains('@')) {

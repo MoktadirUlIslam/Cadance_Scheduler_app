@@ -57,7 +57,7 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
   Future<void> _handleResetPassword() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final authProvider = context.read<AuthProvider>();
+    final authProvider = context.read<UserAuthProvider>();
     final success = await authProvider.resetPassword(
       _emailController.text.trim(),
     );
@@ -244,7 +244,7 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
           const SizedBox(height: 20),
 
           // Send Button
-          Consumer<AuthProvider>(
+          Consumer<UserAuthProvider>(
             builder: (context, auth, child) {
               return CadencePrimaryButton(
                 label: 'Send Reset Link',
@@ -346,7 +346,7 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
         const SizedBox(height: 24),
 
         // Resend Button
-        Consumer<AuthProvider>(
+        Consumer<UserAuthProvider>(
           builder: (context, auth, child) {
             return OutlinedButton(
               onPressed: auth.isLoading ? null : () => _handleResetPassword(),

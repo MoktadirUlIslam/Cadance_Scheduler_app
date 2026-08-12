@@ -25,7 +25,8 @@ dependencies:
   provider: ^6.1.2
   shared_preferences: ^2.0.15
   table_calendar: ^3.0.0
-  # Notification & Alarm Dependencies (Only these)
+
+  # Notification & Alarm Dependencies
   flutter_local_notifications: ^17.0.0
   timezone: ^0.9.2
   audioplayers: ^6.0.0
@@ -34,14 +35,13 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-  flutter_launcher_icons: ^0.14.1  # Add this line
+  flutter_launcher_icons: ^0.14.1
 
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
   image_path: "assets/logo/app_logo.png"
   min_sdk_android: 21
-  # color changed
   adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/logo/app_logo.png"
   remove_alpha_ios: true

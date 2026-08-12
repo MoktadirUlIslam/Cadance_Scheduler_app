@@ -112,7 +112,7 @@ class _SplashScreenState extends State<SplashScreen>
     if (_isNavigating) return;
     _isNavigating = true;
 
-    final authProvider = context.read<AuthProvider>();
+    final authProvider = context.read<UserAuthProvider >();
 
     // Use mounted check
     if (!mounted) {

@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:pomodoro/core/data_provider.dart';
 import 'package:pomodoro/providers/ThemeProvider.dart';
 import 'package:pomodoro/providers/auth_provider.dart';
@@ -23,23 +24,27 @@ void main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // FIXED: Enable Firestore persistence for offline support
+    // Enable Firestore persistence for offline support
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-  } catch (_) {
+    // ✅ CRITICAL FIX: Set Firebase Auth persistence to LOCAL
+    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+
+  } catch (e) {
+    print('⚠️ Firebase initialization error: $e');
     // Silent fail - Firebase will be handled gracefully
   }
 
   runApp(
     MultiProvider(
       providers: [
-        // FIXED: Only register providers once
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        // ✅ Order matters - DataProvider before AuthProvider
         ChangeNotifierProvider(create: (_) => DataProvider()),
+        ChangeNotifierProvider(create: (_) => UserAuthProvider ()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => TimerProvider()),
         ChangeNotifierProvider(create: (_) => EventProvider()),
         ChangeNotifierProvider(create: (_) => TaskProvider()),
@@ -65,7 +70,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _trackAppUsage();
+
+    // ✅ Initialize AuthProvider after widget tree is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializeProviders();
+    });
   }
 
   @override
@@ -81,6 +90,21 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ New method to initialize providers
+  void _initializeProviders() {
+    try {
+      final authProvider = context.read<UserAuthProvider >();
+      final dataProvider = context.read<DataProvider>();
+
+      // Initialize AuthProvider with DataProvider reference
+      authProvider.initialize(dataProvider);
+
+      print('✅ Providers initialized successfully');
+    } catch (e) {
+      print('❌ Error initializing providers: $e');
+    }
+  }
+
   void _trackAppUsage() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _recordActivityIfAuthenticated();
@@ -89,16 +113,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   Future<void> _recordActivityIfAuthenticated() async {
     try {
-      // FIXED: Add mounted check
       if (!mounted) return;
 
-      final authProvider = context.read<AuthProvider>();
+      final authProvider = context.read<UserAuthProvider >();
       if (authProvider.isAuthenticated) {
         final dataProvider = context.read<DataProvider>();
         await dataProvider.recordActivity();
       }
-    } catch (_) {
+    } catch (e) {
       // Silent fail - app usage tracking is non-critical
+      print('⚠️ Activity tracking error: $e');
     }
   }
 
@@ -107,7 +131,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
         return MaterialApp(
-          title: 'Pomodoro App',
+          title: 'Cadance',
           theme: ThemeData(
             primarySwatch: Colors.blue,
             scaffoldBackgroundColor: Colors.white,
