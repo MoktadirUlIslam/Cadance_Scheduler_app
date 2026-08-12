@@ -762,8 +762,14 @@ class TaskProvider extends ChangeNotifier {
     return _allTasks.where((task) => !task.isDone).length;
   }
 
+  // In task_provider.dart
+
   int get overdueTasksCount {
-    return _allTasks.where((task) => !task.isDone && task.isOverdue).length;
+    return _allTasks.where((task) =>
+    !task.isDone &&
+        task.isOverdue &&
+        task.type.hasDeadline  // ✅ Only tasks with deadlines
+    ).length;
   }
 
   int getTasksCountByType(TaskType type) {
@@ -798,9 +804,12 @@ class TaskProvider extends ChangeNotifier {
     }).toList();
   }
 
+  // In task_provider.dart
+
   List<Task> getOverdueDeadlineTasks() {
     final now = DateTime.now();
     return _allTasks.where((task) {
+      // ✅ Only tasks with deadlines
       return task.type.hasDeadline &&
           !task.isDone &&
           task.deadline != null &&

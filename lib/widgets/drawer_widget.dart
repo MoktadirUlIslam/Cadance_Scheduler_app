@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../core/data_provider.dart';
 import '../providers/ThemeProvider.dart';
-import '../providers/auth_provider.dart';
+import '../providers/UserAuthProvider.dart';
 import '../screens/AboutScreen.dart';
 import '../screens/starting_screen/login_screen.dart';
 import '../screens/home/home_screen.dart';

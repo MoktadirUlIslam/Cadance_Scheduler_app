@@ -1,7 +1,7 @@
 // lib/screens/starting_screen/login_screen.dart
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:pomodoro/providers/auth_provider.dart';
+import 'package:pomodoro/providers/UserAuthProvider.dart';
 import 'package:pomodoro/screens/starting_screen/ForgotPassScreen.dart';
 import 'package:provider/provider.dart';
 import 'package:pomodoro/screens/starting_screen/signup_screen.dart';

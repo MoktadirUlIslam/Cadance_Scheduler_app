@@ -1,11 +1,12 @@
 // lib/providers/user_auth_provider.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_auth/firebase_auth.dart';
 import '../core/data_provider.dart';
 import '../models/user_model.dart';
 import '../services/firebase_service.dart';
 
-// ✅ Renamed to UserAuthProvider to avoid conflict with firebase_auth
 class UserAuthProvider extends ChangeNotifier {
   final FirebaseService _firebaseService = FirebaseService();
   final FirebaseAuth _auth = FirebaseAuth.instance;
@@ -25,16 +26,25 @@ class UserAuthProvider extends ChangeNotifier {
   bool get isInitialized => _isInitialized;
 
   UserAuthProvider() {
+    // Initialize auth listener
     _initAuthListener();
+    // Check for existing session immediately
+    _checkCurrentUser();
   }
 
   void initialize(DataProvider dataProvider) {
     _dataProvider = dataProvider;
-    _checkCurrentUser();
+    // If we already have a user, refresh data
+    if (_user != null && _dataProvider != null) {
+      _refreshDataProvider();
+    }
+    // Notify listeners that data provider is now available
+    notifyListeners();
   }
 
   Future<void> _checkCurrentUser() async {
-    if (_isCheckingSession || _dataProvider == null) return;
+    // Remove the _dataProvider null check from here
+    if (_isCheckingSession) return;
 
     _isLoading = true;
     _isCheckingSession = true;
@@ -45,10 +55,17 @@ class UserAuthProvider extends ChangeNotifier {
 
       if (currentUser != null) {
         try {
+          // Force token refresh
           await currentUser.getIdToken(true);
           _user = UserModel.fromFirebaseUser(currentUser);
           print('✅ Auth session restored for: ${_user?.email}');
-          await _refreshDataProvider();
+
+          // Try to refresh data provider if available
+          if (_dataProvider != null) {
+            await _refreshDataProvider();
+          } else {
+            print('⚠️ DataProvider not yet initialized, will refresh later');
+          }
         } catch (e) {
           print('❌ Invalid token: $e');
           await _firebaseService.signOut();
@@ -71,6 +88,7 @@ class UserAuthProvider extends ChangeNotifier {
 
   void _initAuthListener() {
     _firebaseService.authStateChanges.listen((User? firebaseUser) async {
+      // Don't process if we're already checking session
       if (_isCheckingSession) return;
 
       try {
@@ -79,7 +97,12 @@ class UserAuthProvider extends ChangeNotifier {
             await firebaseUser.getIdToken(true);
             _user = UserModel.fromFirebaseUser(firebaseUser);
             print('✅ Auth state changed: User logged in');
-            await _refreshDataProvider();
+
+            if (_dataProvider != null) {
+              await _refreshDataProvider();
+            } else {
+              print('⚠️ DataProvider not yet initialized, will refresh later');
+            }
           } catch (e) {
             print('❌ Invalid user in auth state change: $e');
             await _firebaseService.signOut();
@@ -142,9 +165,16 @@ class UserAuthProvider extends ChangeNotifier {
         password: password,
       );
       _user = userModel;
-      await _auth.setPersistence(Persistence.LOCAL);
+
+      // Only set persistence on web (mobile handles this automatically)
+      if (kIsWeb) {
+        await _auth.setPersistence(Persistence.LOCAL);
+      }
+
       _isLoading = false;
-      await _refreshDataProvider();
+      if (_dataProvider != null) {
+        await _refreshDataProvider();
+      }
       notifyListeners();
       print('✅ User signed up successfully: ${userModel.email}');
       return true;
@@ -171,9 +201,16 @@ class UserAuthProvider extends ChangeNotifier {
         password: password,
       );
       _user = userModel;
-      await _auth.setPersistence(Persistence.LOCAL);
+
+      // Only set persistence on web (mobile handles this automatically)
+      if (kIsWeb) {
+        await _auth.setPersistence(Persistence.LOCAL);
+      }
+
       _isLoading = false;
-      await _refreshDataProvider();
+      if (_dataProvider != null) {
+        await _refreshDataProvider();
+      }
       notifyListeners();
       print('✅ User signed in successfully: ${userModel.email}');
       return true;

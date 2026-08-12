@@ -1,12 +1,13 @@
 // lib/main.dart
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:pomodoro/core/data_provider.dart';
 import 'package:pomodoro/providers/ThemeProvider.dart';
-import 'package:pomodoro/providers/auth_provider.dart';
+import 'package:pomodoro/providers/UserAuthProvider.dart';
 import 'package:pomodoro/screens/Event_Maneger/providers/event_provider.dart';
 import 'package:pomodoro/screens/Focus%20Timer/provider/timer_provider.dart';
 import 'package:pomodoro/screens/Profile/providers/profile_provider.dart';
@@ -30,20 +31,22 @@ void main() async {
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    // ✅ CRITICAL FIX: Set Firebase Auth persistence to LOCAL
-    await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+    // ✅ Only set persistence on web platforms
+    // For mobile, Firebase Auth persists automatically
+    if (kIsWeb) {
+      await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+    }
 
   } catch (e) {
     print('⚠️ Firebase initialization error: $e');
-    // Silent fail - Firebase will be handled gracefully
   }
 
   runApp(
     MultiProvider(
       providers: [
-        // ✅ Order matters - DataProvider before AuthProvider
+        // ✅ Order matters - DataProvider before UserAuthProvider
         ChangeNotifierProvider(create: (_) => DataProvider()),
-        ChangeNotifierProvider(create: (_) => UserAuthProvider ()),
+        ChangeNotifierProvider(create: (_) => UserAuthProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => TimerProvider()),
         ChangeNotifierProvider(create: (_) => EventProvider()),
@@ -71,7 +74,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // ✅ Initialize AuthProvider after widget tree is built
+    // ✅ Initialize providers after widget tree is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeProviders();
     });
@@ -90,13 +93,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     }
   }
 
-  // ✅ New method to initialize providers
   void _initializeProviders() {
     try {
-      final authProvider = context.read<UserAuthProvider >();
+      final authProvider = context.read<UserAuthProvider>();
       final dataProvider = context.read<DataProvider>();
 
-      // Initialize AuthProvider with DataProvider reference
+      // Initialize UserAuthProvider with DataProvider reference
       authProvider.initialize(dataProvider);
 
       print('✅ Providers initialized successfully');
@@ -115,7 +117,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     try {
       if (!mounted) return;
 
-      final authProvider = context.read<UserAuthProvider >();
+      final authProvider = context.read<UserAuthProvider>();
       if (authProvider.isAuthenticated) {
         final dataProvider = context.read<DataProvider>();
         await dataProvider.recordActivity();

@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:pomodoro/utilites/app_colors.dart';
 import 'package:pomodoro/widgets/cadence_auth_widgets.dart';
 import '../../routes/app_routes.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/UserAuthProvider.dart';
 import '../home/home_screen.dart';
 import 'login_screen.dart';
 

@@ -2,6 +2,7 @@
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/user_model.dart';
 import '../models/timer_stats_model.dart';
 
@@ -14,7 +15,11 @@ class FirebaseService {
   // ────────────────────────────────────────────────
 
   User? get currentUser => _auth.currentUser;
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  Stream<User?> get authStateChanges {
+    // Ensure we're listening to auth state changes properly
+    return _auth.authStateChanges();
+  }
 
   // ────────────────────────────────────────────────
   // AUTH METHODS
@@ -32,9 +37,14 @@ class FirebaseService {
       );
 
       final user = result.user!;
+
+      // Update display name
       await user.updateDisplayName(username);
+
+      // Send email verification (optional, but good practice)
       await user.sendEmailVerification();
 
+      // Store user data in Firestore
       await _storeUserData(
         userId: user.uid,
         username: username.trim(),
@@ -58,6 +68,16 @@ class FirebaseService {
         email: email.trim(),
         password: password,
       );
+
+      // On mobile, Firebase Auth automatically persists the session
+      // On web, we need to explicitly set persistence
+      if (kIsWeb) {
+        await _auth.setPersistence(Persistence.LOCAL);
+      }
+
+      // Force token refresh to ensure valid session
+      await result.user!.getIdToken(true);
+
       return UserModel.fromFirebaseUser(result.user!);
     } on FirebaseAuthException catch (e) {
       throw _handleAuthError(e);
@@ -77,8 +97,59 @@ class FirebaseService {
   Future<void> signOut() async {
     try {
       await _auth.signOut();
-    } catch (_) {
-      await _auth.signOut();
+    } catch (e) {
+      // If signOut fails, try force sign out
+      try {
+        await _auth.signOut();
+      } catch (_) {
+        // Silently handle - user is already signed out
+      }
+    }
+  }
+
+  // ────────────────────────────────────────────────
+  // SESSION MANAGEMENT
+  // ────────────────────────────────────────────────
+
+  /// Check if the current session is valid
+  Future<bool> isSessionValid() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return false;
+
+      // Force token refresh to check validity
+      await user.getIdToken(true);
+      return true;
+    } catch (e) {
+      print('❌ Session validation failed: $e');
+      return false;
+    }
+  }
+
+  /// Get the current user's ID token
+  Future<String?> getIdToken({bool forceRefresh = false}) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return null;
+      return await user.getIdToken(forceRefresh);
+    } catch (e) {
+      print('❌ Error getting ID token: $e');
+      return null;
+    }
+  }
+
+  /// Get current user with fresh data
+  Future<UserModel?> getCurrentUserModel() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return null;
+
+      // Force token refresh
+      await user.getIdToken(true);
+      return UserModel.fromFirebaseUser(user);
+    } catch (e) {
+      print('❌ Error getting current user model: $e');
+      return null;
     }
   }
 
@@ -95,7 +166,33 @@ class FirebaseService {
       'username': username,
       'email': email,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+      'lastLoginAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Update user's last login timestamp
+  Future<void> updateLastLogin(String userId) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'lastLoginAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('⚠️ Error updating last login: $e');
+    }
+  }
+
+  /// Get user data from Firestore
+  Future<Map<String, dynamic>?> getUserData(String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (doc.exists) {
+        return doc.data();
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting user data: $e');
+      return null;
+    }
   }
 
   // ────────────────────────────────────────────────
@@ -125,6 +222,7 @@ class FirebaseService {
           'streak': 0,
           'appStartTime': Timestamp.fromDate(now),
           'history': [],
+          'lastUpdated': FieldValue.serverTimestamp(),
         });
       }
     } catch (e) {
@@ -154,6 +252,7 @@ class FirebaseService {
             ? Timestamp.fromDate(stats.appStartTime!)
             : Timestamp.fromDate(DateTime.now()),
         'history': stats.history.map((h) => h.toMap()).toList(),
+        'lastUpdated': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
     } catch (e) {
       throw Exception('Failed to save timer stats: $e');
@@ -168,7 +267,9 @@ class FirebaseService {
     List<DailyStats>? history,
   }) async {
     try {
-      final Map<String, dynamic> updates = {};
+      final Map<String, dynamic> updates = {
+        'lastUpdated': FieldValue.serverTimestamp(),
+      };
 
       if (grandTotalFocusMinutes != null) {
         updates['grandTotalFocusMinutes'] = grandTotalFocusMinutes;
@@ -186,9 +287,7 @@ class FirebaseService {
         updates['history'] = history.map((h) => h.toMap()).toList();
       }
 
-      if (updates.isNotEmpty) {
-        await _timerStatsRef.update(updates);
-      }
+      await _timerStatsRef.update(updates);
     } catch (e) {
       throw Exception('Failed to update timer stats: $e');
     }
@@ -239,8 +338,28 @@ class FirebaseService {
         return 'Network error. Please check your internet connection.';
       case 'too-many-requests':
         return 'Too many attempts. Please try again later.';
+      case 'requires-recent-login':
+        return 'For security reasons, please sign in again to continue.';
+      case 'user-token-expired':
+        return 'Your session has expired. Please sign in again.';
       default:
         return e.message ?? 'An unexpected error occurred. Please try again.';
+    }
+  }
+
+  // ────────────────────────────────────────────────
+  // HEALTH CHECK
+  // ────────────────────────────────────────────────
+
+  /// Check if Firebase services are working
+  Future<bool> checkFirebaseHealth() async {
+    try {
+      // Try to access Firestore
+      await _firestore.collection('users').limit(1).get();
+      return true;
+    } catch (e) {
+      print('❌ Firebase health check failed: $e');
+      return false;
     }
   }
 }

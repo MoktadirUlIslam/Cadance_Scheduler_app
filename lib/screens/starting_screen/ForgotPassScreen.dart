@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:pomodoro/utilites/app_colors.dart';
 import 'package:pomodoro/widgets/cadence_auth_widgets.dart';
-import '../../providers/auth_provider.dart';
+import '../../providers/UserAuthProvider.dart';
 
 class ForgotPassScreen extends StatefulWidget {
   const ForgotPassScreen({super.key});
