@@ -6,7 +6,7 @@ import 'package:flutter/cupertino.dart';
 
 import '../models/profile_model.dart';
 import '../models/timer_stats_model.dart';
-import '../screens/Task_manager/services/task_firestore_service.dart';
+import '../screens/Task_manager/services/TaskManagerStatsService.dart';
 import '../services/ActivityTrackerService.dart';
 
 class DataProvider extends ChangeNotifier {

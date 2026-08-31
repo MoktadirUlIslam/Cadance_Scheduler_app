@@ -4,20 +4,22 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../../models/taskmanager_model.dart';
 import '../services/TaskCompletionService.dart';
-import '../services/task_firestore_service.dart';
+import '../services/TaskManagerStatsService.dart';
 
 /// 🚀 ULTRA-FAST TaskProvider - Optimized for sub-second operations
 class TaskProvider extends ChangeNotifier {
   final TaskFirestoreService _service = TaskFirestoreService();
   final TaskCompletionService _completionService = TaskCompletionService();
-  final TaskManagerStatsService _statsService = TaskManagerStatsService();
+
+  // ✅ Fixed: Use lazy getter
+  TaskManagerStatsService get _statsService => TaskManagerStatsService();
 
   // ⚡ CACHE LAYER - For instant access
-  static final Map<String, Task> _taskCache = {}; // Global cache
-  static final Map<String, List<String>> _dateIndex = {}; // Date -> Task IDs
+  static final Map<String, Task> _taskCache = {};
+  static final Map<String, List<String>> _dateIndex = {};
 
   // ⚡ OPTIMIZED DATA STORAGE
-  final Map<String, Task> _tasksMap = {}; // O(1) lookups
+  final Map<String, Task> _tasksMap = {};
   final Map<String, List<Task>> _recurringGroups = {};
   final Map<DateTime, List<Task>> _dateTaskCache = {};
 
@@ -99,12 +101,18 @@ class TaskProvider extends ChangeNotifier {
       _dateTaskCache[_selectedDate] = _filterTasksForDateOptimized(_selectedDate);
 
       _startSemesterReminderService();
-      notifyListeners();
+
+      // ✅ FIXED: Use post-frame callback to avoid build-phase notifications
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed) notifyListeners();
+      });
 
     } catch (e) {
       _error = e.toString();
       _isLoading = false;
-      notifyListeners();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed) notifyListeners();
+      });
     }
   }
 
@@ -123,11 +131,9 @@ class TaskProvider extends ChangeNotifier {
     final Map<String, List<Task>> tempRecurringGroups = {};
 
     for (var task in _tasksMap.values) {
-      // Date index
       final dateKey = _getDateKey(task.date);
       tempDateIndex.putIfAbsent(dateKey, () => []).add(task.id!);
 
-      // Recurring groups
       if (task.recurringGroupId != null) {
         tempRecurringGroups
             .putIfAbsent(task.recurringGroupId!, () => [])
@@ -155,7 +161,6 @@ class TaskProvider extends ChangeNotifier {
             (tasks) {
           if (_isDisposed) return;
 
-          // ⚡ BATCH UPDATE - Process in chunks
           _batchUpdateTasks(tasks);
 
           _error = null;
@@ -183,7 +188,6 @@ class TaskProvider extends ChangeNotifier {
   }
 
   void _batchUpdateTasks(List<Task> tasks) {
-    // ⚡ Clear and repopulate map - O(n)
     _tasksMap.clear();
     for (var task in tasks) {
       if (task.id != null) {
@@ -208,7 +212,6 @@ class TaskProvider extends ChangeNotifier {
   bool _isTaskVisibleOnDate(Task task, DateTime date) {
     final selectedDate = DateTime(date.year, date.month, date.day);
 
-    // ⚡ Quick date check first
     if (!task.isRecurring) {
       final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
       if (task.type.hasTimeRange) {
@@ -225,13 +228,11 @@ class TaskProvider extends ChangeNotifier {
       return taskDate.isAtSameMomentAs(selectedDate);
     }
 
-    // ⚡ Recurring task check - pre-compute if possible
     if (task.isRecurringParent) {
       final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
       return taskDate.isAtSameMomentAs(selectedDate);
     }
 
-    // ⚡ Child recurring task - optimized checks
     if (task.isDateSkipped(selectedDate)) return false;
 
     final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
@@ -273,9 +274,10 @@ class TaskProvider extends ChangeNotifier {
 
   Future<void> loadTasksForDate(DateTime date) async {
     _selectedDate = date;
-    // ⚡ Instant cache lookup - no async delay
     _dateTaskCache[_selectedDate] = _filterTasksForDateOptimized(date);
-    notifyListeners();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isDisposed) notifyListeners();
+    });
   }
 
   void selectDate(DateTime date) {
@@ -292,24 +294,20 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ⚡ OPTIMIZATION 1: Local update first (optimistic)
       final taskCopy = task.copyWith(id: DateTime.now().millisecondsSinceEpoch.toString());
       _tasksMap[taskCopy.id!] = taskCopy;
       _buildAllIndexes();
       _invalidateDateCache();
       notifyListeners();
 
-      // ⚡ OPTIMIZATION 2: Async Firebase write
       final newTask = await _service.createTask(task);
 
       if (newTask != null && newTask.id != null) {
-        // Update with real ID
         _tasksMap.remove(taskCopy.id);
         _tasksMap[newTask.id!] = newTask;
         _buildAllIndexes();
       }
 
-      // ⚡ OPTIMIZATION 3: Generate recurring in background
       if (task.isRecurring && task.isRecurringParent) {
         unawaited(_generateRecurringTasksOptimized(task));
       }
@@ -324,7 +322,6 @@ class TaskProvider extends ChangeNotifier {
       return newTask ?? taskCopy;
 
     } catch (e) {
-      // Rollback optimistic update
       _tasksMap.removeWhere((key, value) => value.id == task.id);
       _buildAllIndexes();
       _error = e.toString();
@@ -344,7 +341,6 @@ class TaskProvider extends ChangeNotifier {
         .map((t) => DateTime(t.date.year, t.date.month, t.date.day))
         .toSet();
 
-    // ⚡ BATCH CREATE - Use write batch
     final tasksToCreate = <Task>[];
 
     for (var date in allDates) {
@@ -385,7 +381,6 @@ class TaskProvider extends ChangeNotifier {
       ));
     }
 
-    // ⚡ BATCH WRITE
     for (var newTask in tasksToCreate) {
       await _service.createTask(newTask);
     }
@@ -396,7 +391,6 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ⚡ Optimistic update
       if (task.id != null) {
         _tasksMap[task.id!] = task;
         _buildAllIndexes();
@@ -406,7 +400,6 @@ class TaskProvider extends ChangeNotifier {
 
       final updatedTask = await _service.updateTask(task);
 
-      // ⚡ Handle recurring update in background
       if (task.isRecurringParent && task.recurringGroupId != null) {
         unawaited(_regenerateRecurringTasksOptimized(task));
       }
@@ -434,7 +427,6 @@ class TaskProvider extends ChangeNotifier {
 
     final existingChildren = getTasksByRecurringGroup(parent.recurringGroupId!);
 
-    // ⚡ PARALLEL DELETE
     await Future.wait(
         existingChildren
             .where((child) => child.id != null)
@@ -451,14 +443,12 @@ class TaskProvider extends ChangeNotifier {
     try {
       final task = _tasksMap[taskId];
 
-      // ⚡ Optimistic delete
       final wasRecurringParent = task?.isRecurringParent ?? false;
       final groupId = task?.recurringGroupId;
 
       _tasksMap.remove(taskId);
 
       if (wasRecurringParent && groupId != null) {
-        // Delete all children
         final children = getTasksByRecurringGroup(groupId);
         for (var child in children) {
           if (child.id != null) {
@@ -471,7 +461,6 @@ class TaskProvider extends ChangeNotifier {
       _invalidateDateCache();
       notifyListeners();
 
-      // ⚡ Async Firebase delete
       await _service.deleteTask(taskId);
 
       if (wasRecurringParent && groupId != null) {
@@ -505,7 +494,6 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ⚡ Optimistic toggle
       final toggledTask = task.copyWith(isDone: !task.isDone);
       if (task.id != null) {
         _tasksMap[task.id!] = toggledTask;
@@ -546,7 +534,6 @@ class TaskProvider extends ChangeNotifier {
     try {
       final extendedTask = task.extendSemester();
 
-      // ⚡ Optimistic update
       if (extendedTask.id != null) {
         _tasksMap[extendedTask.id!] = extendedTask;
         _buildAllIndexes();
@@ -557,7 +544,6 @@ class TaskProvider extends ChangeNotifier {
       final updatedParent = await _service.updateTask(extendedTask);
 
       if (updatedParent != null) {
-        // ⚡ Generate extended classes in background
         unawaited(_generateExtendedClassesOptimized(updatedParent));
 
         _error = null;
@@ -630,7 +616,6 @@ class TaskProvider extends ChangeNotifier {
       ));
     }
 
-    // ⚡ BATCH CREATE
     for (var newTask in tasksToCreate) {
       await _service.createTask(newTask);
     }
@@ -844,7 +829,9 @@ class TaskProvider extends ChangeNotifier {
 
     } finally {
       _isLoading = false;
-      notifyListeners();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed) notifyListeners();
+      });
     }
   }
 
@@ -878,7 +865,6 @@ class TaskProvider extends ChangeNotifier {
   Future<void> _checkSemesterEndings() async {
     if (_isDisposed) return;
 
-    // ⚡ Use cached active recurring tasks
     for (var task in activeRecurringTasks) {
       if (task.isSemesterEndingSoon) {
         _notifySemesterEnding(task);

@@ -1,14 +1,18 @@
 // lib/screens/TaskManager/services/task_completion_service.dart
+
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../models/taskmanager_model.dart';
+import 'TaskManagerStatsService.dart' hide TaskFirestoreService;
 import 'task_firestore_service.dart';
 import 'task_notification_helper.dart';
 
 class TaskCompletionService {
   final TaskFirestoreService _taskService = TaskFirestoreService();
   final TaskNotificationHelper _notificationHelper = TaskNotificationHelper();
-  final TaskManagerStatsService _statsService = TaskManagerStatsService();
+
+  TaskManagerStatsService get _statsService => TaskManagerStatsService();
 
   // Check and auto-complete classes after end time - UPDATED to check all tasks
   Future<void> checkAndCompleteClasses() async {
