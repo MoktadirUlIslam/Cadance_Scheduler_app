@@ -127,7 +127,7 @@ class TaskCard extends StatelessWidget {
                       ),
                     ),
 
-                    // Type badge
+                    // Type badge - shows correct type
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
@@ -139,7 +139,7 @@ class TaskCard extends StatelessWidget {
                         ),
                       ),
                       child: Text(
-                        task.type.label,
+                        _getTypeLabel(),
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
@@ -168,7 +168,7 @@ class TaskCard extends StatelessWidget {
 
                 const SizedBox(height: 8),
 
-                // Info row: Date, Time, Location
+                // Info row: Date, Time, Location, Type details
                 Wrap(
                   spacing: 12,
                   runSpacing: 4,
@@ -185,6 +185,24 @@ class TaskCard extends StatelessWidget {
                         Icons.event,
                         'Due ${DateFormat('MMM d').format(task.deadline!)}',
                         isOverdue: task.isOverdue && !task.isDone,
+                      ),
+                    // Show class type for Class tasks
+                    if (task.type == TaskType.classes && task.classType != null && task.classType!.isNotEmpty)
+                      _buildInfoChip(
+                        Icons.class_,
+                        task.classType!,
+                      ),
+                    // Show exam type for Exam tasks
+                    if (task.type == TaskType.exam && task.examType != null && task.examType!.isNotEmpty)
+                      _buildInfoChip(
+                        Icons.quiz,
+                        task.examType!,
+                      ),
+                    // Show test details for Class Test
+                    if (task.type == TaskType.exam && task.examType == 'Class Test' && task.classTestNo != null && task.classTestNo!.isNotEmpty)
+                      _buildInfoChip(
+                        Icons.numbers,
+                        'Test ${task.classTestNo}',
                       ),
                   ],
                 ),
@@ -304,6 +322,28 @@ class TaskCard extends StatelessWidget {
     );
   }
 
+  // Get type label with subtype information
+  String _getTypeLabel() {
+    // For Class tasks - show the specific class type
+    if (task.type == TaskType.classes) {
+      if (task.classType != null && task.classType!.isNotEmpty) {
+        return task.classType!; // Shows "Regular Class" or "Sessional Class"
+      }
+      return 'Class'; // Fallback if classType is null
+    }
+
+    // For Exam tasks - show the specific exam type
+    if (task.type == TaskType.exam) {
+      if (task.examType != null && task.examType!.isNotEmpty) {
+        return task.examType!; // Shows "Class Test", "Midterm", or "Final Exam"
+      }
+      return 'Exam'; // Fallback if examType is null
+    }
+
+    // For all other task types
+    return task.type.label; // "Assignment", "Lab Report", "Others"
+  }
+
   Widget _buildInfoChip(IconData icon, String label, {bool isOverdue = false}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -340,10 +380,6 @@ class TaskCard extends StatelessWidget {
       ),
     );
   }
-
-  // lib/screens/TaskManager/widgets/task_card.dart
-
-// Replace the _formatTimeCompact method with this:
 
   String _formatTimeCompact(DateTime start, DateTime end) {
     final format = (DateTime t) {

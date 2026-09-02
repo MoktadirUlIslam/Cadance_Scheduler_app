@@ -9,7 +9,6 @@ enum FilterType {
   exam,
   assignment,
   labReport,
-  classTest,
   classes,
   highPriority,
   mediumPriority,
@@ -21,7 +20,6 @@ enum TaskType {
   assignment,
   labReport,
   exam,
-  classTest,
   others,
 }
 
@@ -43,19 +41,54 @@ enum ReminderOption {
   twoDays,
 }
 
-// NEW: Recurrence frequency enum
+// Recurrence frequency enum
 enum RecurrenceFrequency {
   none,
   weekly,
   biWeekly,
 }
 
-// NEW: Extension status enum
+// Extension status enum
 enum ExtensionStatus {
   active,        // Semester is active
   ended,         // Semester ended naturally
   extended,      // Semester was extended
   archived,      // Semester is archived
+}
+
+// Class Subtype enum
+enum ClassSubtype {
+  regular,
+  sessional,
+}
+
+extension ClassSubtypeExtension on ClassSubtype {
+  String get label {
+    switch (this) {
+      case ClassSubtype.regular:
+        return 'Regular Class';
+      case ClassSubtype.sessional:
+        return 'Sessional Class';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case ClassSubtype.regular:
+        return Icons.class_;
+      case ClassSubtype.sessional:
+        return Icons.school;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case ClassSubtype.regular:
+        return AppColors.primaryLight;
+      case ClassSubtype.sessional:
+        return AppColors.accentLight;
+    }
+  }
 }
 
 extension RecurrenceFrequencyExtension on RecurrenceFrequency {
@@ -180,15 +213,13 @@ extension TaskTypeExtension on TaskType {
   String get label {
     switch (this) {
       case TaskType.classes:
-        return 'Classes';
+        return 'Class';
       case TaskType.assignment:
         return 'Assignment';
       case TaskType.labReport:
         return 'Lab Report';
       case TaskType.exam:
         return 'Exam';
-      case TaskType.classTest:
-        return 'Class Test';
       case TaskType.others:
         return 'Others';
     }
@@ -204,8 +235,6 @@ extension TaskTypeExtension on TaskType {
         return Icons.science;
       case TaskType.exam:
         return Icons.quiz;
-      case TaskType.classTest:
-        return Icons.school;
       case TaskType.others:
         return Icons.more_horiz;
     }
@@ -221,8 +250,6 @@ extension TaskTypeExtension on TaskType {
         return AppColors.successLight;
       case TaskType.exam:
         return AppColors.accentLight;
-      case TaskType.classTest:
-        return AppColors.warningLight;
       case TaskType.others:
         return Colors.grey;
     }
@@ -241,12 +268,12 @@ extension TaskTypeExtension on TaskType {
   }
 
   bool get hasLocation {
-    return this == TaskType.classes || this == TaskType.exam || this == TaskType.classTest;
+    return this == TaskType.classes || this == TaskType.exam;
   }
 
   bool get hasTeacher {
     return this == TaskType.classes || this == TaskType.assignment ||
-        this == TaskType.labReport || this == TaskType.classTest;
+        this == TaskType.labReport;
   }
 
   bool get hasDeadline {
@@ -263,10 +290,6 @@ extension TaskTypeExtension on TaskType {
 
   bool get hasExamType {
     return this == TaskType.exam;
-  }
-
-  bool get hasClassTestFields {
-    return this == TaskType.classTest;
   }
 
   bool get hasManualCompletion {
@@ -360,6 +383,7 @@ class Task {
   final List<ReminderOption> reminders;
   final bool alarmOn;
   final DateTime? deadline;
+  final DateTime? submissionTime;
   final String? description;
   final bool isDone;
 
@@ -370,7 +394,10 @@ class Task {
   final String? experimentNo;
   final String? experimentTitle;
 
-  // NEW: Recurring class fields
+  // Class subtype
+  final String? classType; // "Regular Class" or "Sessional Class"
+
+  // Recurring class fields
   final String? recurringGroupId;
   final RecurrenceFrequency recurrenceFrequency;
   final DateTime? expectedEndDate;
@@ -400,14 +427,16 @@ class Task {
     this.reminders = const [],
     this.alarmOn = false,
     this.deadline,
+    this.submissionTime,
     this.description,
     this.examType,
     this.classTestNo,
     this.testTopic,
     this.experimentNo,
     this.experimentTitle,
+    this.classType,
     this.isDone = false,
-    // NEW: Recurring fields with defaults
+    // Recurring fields with defaults
     this.recurringGroupId,
     this.recurrenceFrequency = RecurrenceFrequency.none,
     this.expectedEndDate,
@@ -450,12 +479,12 @@ class Task {
         return experimentNo != null ? 'Experiment $experimentNo' : 'Lab Report';
       case TaskType.exam:
         return examType ?? 'Exam';
-      case TaskType.classTest:
-        return classTestNo != null ? 'Class Test $classTestNo' : 'Class Test';
       case TaskType.others:
         return 'Task';
     }
   }
+
+  String get classTypeLabel => classType ?? 'Regular Class';
 
   String get priorityLabel => priority.label;
   Color get priorityColor => priority.color;
@@ -477,9 +506,26 @@ class Task {
       return DateTime.now().isAfter(endTime!);
     }
     if (deadline != null) {
-      return DateTime.now().isAfter(deadline!);
+      final deadlineToCheck = submissionTime ?? deadline;
+      return DateTime.now().isAfter(deadlineToCheck!);
     }
     return false;
+  }
+
+  bool get isDeadlineApproaching {
+    if (isDone) return false;
+    if (type != TaskType.assignment) return false;
+    if (submissionTime == null) return false;
+    final now = DateTime.now();
+    final daysUntilDeadline = submissionTime!.difference(now).inDays;
+    return daysUntilDeadline >= 0 && daysUntilDeadline <= 2;
+  }
+
+  DateTime? get effectiveDeadline {
+    if (type == TaskType.assignment) {
+      return submissionTime ?? deadline;
+    }
+    return deadline;
   }
 
   Duration get extensionDuration => type.extensionDuration;
@@ -489,18 +535,18 @@ class Task {
   Color get statusColor {
     if (isDone) return Colors.green;
     if (isOverdue) return Colors.red;
-    return Colors.orange;
+    if (isDeadlineApproaching) return Colors.orange;
+    return Colors.blue;
   }
   IconData get statusIcon {
     if (isDone) return Icons.check_circle;
     if (isOverdue) return Icons.warning;
+    if (isDeadlineApproaching) return Icons.timer;
     return Icons.hourglass_empty;
   }
 
-  // NEW: Check if this is a recurring class
   bool get isRecurring => recurrenceFrequency != RecurrenceFrequency.none;
 
-  // NEW: Check if semester is ending soon (within 1 day)
   bool get isSemesterEndingSoon {
     if (expectedEndDate == null) return false;
     if (extensionStatus == ExtensionStatus.ended || extensionStatus == ExtensionStatus.archived) return false;
@@ -508,7 +554,6 @@ class Task {
     return daysUntilEnd <= 1 && daysUntilEnd >= 0;
   }
 
-  // NEW: Check if semester has ended
   bool get isSemesterEnded {
     if (expectedEndDate == null) return false;
     if (extensionStatus == ExtensionStatus.ended || extensionStatus == ExtensionStatus.archived) return true;
@@ -516,17 +561,14 @@ class Task {
         extensionStatus != ExtensionStatus.extended;
   }
 
-// NEW: Get total expected classes (including the start date)
   int get totalExpectedClasses {
     if (!isRecurring || expectedEndDate == null) return 1;
     final daysBetween = expectedEndDate!.difference(date).inDays;
     final interval = recurrenceFrequency.days;
     if (interval == 0) return 1;
-    // Add 1 to include the start date
     return (daysBetween / interval).floor() + 1;
   }
 
-  // NEW: Get actual classes count (including extensions)
   int get actualTotalClasses {
     if (!isRecurring || actualEndDate == null) return totalExpectedClasses;
     final daysBetween = actualEndDate!.difference(date).inDays;
@@ -535,17 +577,14 @@ class Task {
     return (daysBetween / interval).floor() + 1;
   }
 
-  // NEW: Get skipped date count
   int get skippedCount => skippedDates?.length ?? 0;
 
-  // NEW: Get completion rate
   double get completionRate {
     final total = actualTotalClasses;
     if (total == 0) return 0.0;
     return (skippedDates?.length ?? 0) / total;
   }
 
-  // NEW: Check if a specific date is skipped
   bool isDateSkipped(DateTime date) {
     if (skippedDates == null) return false;
     return skippedDates!.any((d) =>
@@ -555,7 +594,6 @@ class Task {
     );
   }
 
-  // NEW: Generate all class dates
   List<DateTime> getAllClassDates() {
     if (!isRecurring || expectedEndDate == null) {
       return [date];
@@ -574,21 +612,18 @@ class Task {
     return dates;
   }
 
-  // NEW: Get upcoming class dates (after today)
   List<DateTime> getUpcomingClassDates() {
     final allDates = getAllClassDates();
     final now = DateTime.now();
     return allDates.where((d) => d.isAfter(now)).toList();
   }
 
-  // NEW: Get completed class dates
   List<DateTime> getCompletedClassDates() {
     final allDates = getAllClassDates();
     final now = DateTime.now();
     return allDates.where((d) => d.isBefore(now)).toList();
   }
 
-  // NEW: Create a copy with extension
   Task extendSemester() {
     if (expectedEndDate == null) return this;
     final newEndDate = expectedEndDate!.add(Duration(days: 7));
@@ -600,7 +635,6 @@ class Task {
     );
   }
 
-  // NEW: End semester
   Task endSemester() {
     return copyWith(
       actualEndDate: DateTime.now(),
@@ -609,7 +643,6 @@ class Task {
     );
   }
 
-  // NEW: Archive semester
   Task archiveSemester() {
     return copyWith(
       extensionStatus: ExtensionStatus.archived,
@@ -617,7 +650,6 @@ class Task {
     );
   }
 
-  // NEW: Skip a specific date
   Task skipDate(DateTime date) {
     final updatedSkipped = List<DateTime>.from(skippedDates ?? []);
     updatedSkipped.add(date);
@@ -627,7 +659,6 @@ class Task {
     );
   }
 
-  // NEW: Unskip a specific date
   Task unskipDate(DateTime date) {
     final updatedSkipped = List<DateTime>.from(skippedDates ?? []);
     updatedSkipped.removeWhere((d) =>
@@ -641,7 +672,6 @@ class Task {
     );
   }
 
-  // Convert to Map for Firestore
   Map<String, dynamic> toMap() {
     return {
       'userId': userId,
@@ -659,14 +689,16 @@ class Task {
       'reminders': reminders.map((e) => e.name).toList(),
       'alarmOn': alarmOn,
       'deadline': deadline != null ? Timestamp.fromDate(deadline!) : null,
+      'submissionTime': submissionTime != null ? Timestamp.fromDate(submissionTime!) : null,
       'description': description,
       'examType': examType,
       'classTestNo': classTestNo,
       'testTopic': testTopic,
       'experimentNo': experimentNo,
       'experimentTitle': experimentTitle,
+      'classType': classType,
       'isDone': isDone,
-      // NEW: Recurring fields
+      // Recurring fields
       'recurringGroupId': recurringGroupId,
       'recurrenceFrequency': recurrenceFrequency.name,
       'expectedEndDate': expectedEndDate != null ? Timestamp.fromDate(expectedEndDate!) : null,
@@ -680,7 +712,6 @@ class Task {
     };
   }
 
-  // Create from Firestore
   factory Task.fromMap(String id, Map<String, dynamic> map) {
     return Task(
       id: id,
@@ -708,14 +739,16 @@ class Task {
       )).toList() ?? [],
       alarmOn: map['alarmOn'] ?? false,
       deadline: map['deadline'] != null ? (map['deadline'] as Timestamp).toDate() : null,
+      submissionTime: map['submissionTime'] != null ? (map['submissionTime'] as Timestamp).toDate() : null,
       description: map['description']?.toString(),
       examType: map['examType']?.toString(),
       classTestNo: map['classTestNo']?.toString(),
       testTopic: map['testTopic']?.toString(),
       experimentNo: map['experimentNo']?.toString(),
       experimentTitle: map['experimentTitle']?.toString(),
+      classType: map['classType']?.toString(),
       isDone: map['isDone'] ?? false,
-      // NEW: Recurring fields
+      // Recurring fields
       recurringGroupId: map['recurringGroupId']?.toString(),
       recurrenceFrequency: RecurrenceFrequency.values.firstWhere(
             (e) => e.name == map['recurrenceFrequency'],
@@ -735,7 +768,6 @@ class Task {
     );
   }
 
-  // Create a copy with updated fields
   Task copyWith({
     String? id,
     String? userId,
@@ -753,14 +785,16 @@ class Task {
     List<ReminderOption>? reminders,
     bool? alarmOn,
     DateTime? deadline,
+    DateTime? submissionTime,
     String? description,
     String? examType,
     String? classTestNo,
     String? testTopic,
     String? experimentNo,
     String? experimentTitle,
+    String? classType,
     bool? isDone,
-    // NEW: Recurring fields
+    // Recurring fields
     String? recurringGroupId,
     RecurrenceFrequency? recurrenceFrequency,
     DateTime? expectedEndDate,
@@ -789,14 +823,16 @@ class Task {
       reminders: reminders ?? this.reminders,
       alarmOn: alarmOn ?? this.alarmOn,
       deadline: deadline ?? this.deadline,
+      submissionTime: submissionTime ?? this.submissionTime,
       description: description ?? this.description,
       examType: examType ?? this.examType,
       classTestNo: classTestNo ?? this.classTestNo,
       testTopic: testTopic ?? this.testTopic,
       experimentNo: experimentNo ?? this.experimentNo,
       experimentTitle: experimentTitle ?? this.experimentTitle,
+      classType: classType ?? this.classType,
       isDone: isDone ?? this.isDone,
-      // NEW: Recurring fields
+      // Recurring fields
       recurringGroupId: recurringGroupId ?? this.recurringGroupId,
       recurrenceFrequency: recurrenceFrequency ?? this.recurrenceFrequency,
       expectedEndDate: expectedEndDate ?? this.expectedEndDate,
@@ -828,14 +864,14 @@ class Task {
   bool get isDueSoon {
     if (isDone) return false;
     final now = DateTime.now();
-    final targetDate = deadline ?? date;
+    final targetDate = effectiveDeadline ?? date;
     return targetDate.difference(now).inHours <= 24 && targetDate.isAfter(now);
   }
 
   String get timeRemaining {
     if (isDone) return 'Completed';
     final now = DateTime.now();
-    final targetDate = deadline ?? date;
+    final targetDate = effectiveDeadline ?? date;
 
     if (now.isAfter(targetDate)) {
       return 'Overdue';
@@ -855,10 +891,10 @@ class Task {
   }
 
   String get formattedDeadlineWithStatus {
-    if (deadline == null) return 'No deadline';
+    if (effectiveDeadline == null) return 'No deadline';
     if (isDone) return '✅ Completed on ${DateFormat('MMM d').format(updatedAt)}';
-    if (isOverdue) return '⚠️ Overdue: ${DateFormat('MMM d, h:mm a').format(deadline!)}';
-    return '📅 Due: ${DateFormat('MMM d, h:mm a').format(deadline!)}';
+    if (isOverdue) return '⚠️ Overdue: ${DateFormat('MMM d, h:mm a').format(effectiveDeadline!)}';
+    return '📅 Due: ${DateFormat('MMM d, h:mm a').format(effectiveDeadline!)}';
   }
 
   bool get shouldCountInStats => isDone && type != TaskType.classes;

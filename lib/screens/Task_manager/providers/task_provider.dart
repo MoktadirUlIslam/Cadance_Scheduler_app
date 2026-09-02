@@ -6,28 +6,28 @@ import '../../../models/taskmanager_model.dart';
 import '../services/TaskCompletionService.dart';
 import '../services/TaskManagerStatsService.dart';
 
-/// 🚀 ULTRA-FAST TaskProvider - Optimized for sub-second operations
+/// ULTRA-FAST TaskProvider - Optimized for sub-second operations
 class TaskProvider extends ChangeNotifier {
   final TaskFirestoreService _service = TaskFirestoreService();
   final TaskCompletionService _completionService = TaskCompletionService();
 
-  // ✅ Fixed: Use lazy getter
+  // Use lazy getter
   TaskManagerStatsService get _statsService => TaskManagerStatsService();
 
-  // ⚡ CACHE LAYER - For instant access
+  // CACHE LAYER - For instant access
   static final Map<String, Task> _taskCache = {};
   static final Map<String, List<String>> _dateIndex = {};
 
-  // ⚡ OPTIMIZED DATA STORAGE
+  // OPTIMIZED DATA STORAGE
   final Map<String, Task> _tasksMap = {};
   final Map<String, List<Task>> _recurringGroups = {};
   final Map<DateTime, List<Task>> _dateTaskCache = {};
 
-  // ⚡ STREAMS with debouncing
+  // STREAMS with debouncing
   StreamSubscription? _tasksSubscription;
   StreamSubscription? _tasksForDateSubscription;
 
-  // ⚡ STATE
+  // STATE
   DateTime _selectedDate = DateTime.now();
   bool _isLoading = false;
   String? _error;
@@ -35,12 +35,12 @@ class TaskProvider extends ChangeNotifier {
   bool _isDisposed = false;
   bool _isInitialLoadComplete = false;
 
-  // ⚡ BATCH OPERATION BUFFER
+  // BATCH OPERATION BUFFER
   final List<Task> _pendingWrites = [];
   Timer? _batchWriteTimer;
   static const Duration _batchDelay = Duration(milliseconds: 100);
 
-  // ⚡ QUICK GETTERS - O(1) operations
+  // QUICK GETTERS - O(1) operations
   List<Task> get allTasks => _tasksMap.values.toList();
   List<Task> get tasksForSelectedDate => _getTasksForDateCached(_selectedDate);
   DateTime get selectedDate => _selectedDate;
@@ -49,7 +49,7 @@ class TaskProvider extends ChangeNotifier {
   Map<String, dynamic> get stats => _stats;
   Map<String, List<Task>> get recurringGroups => _recurringGroups;
 
-  // ⚡ OPTIMIZED RECURRING PARENTS - O(1) with pre-computed list
+  // OPTIMIZED RECURRING PARENTS - O(1) with pre-computed list
   List<Task>? _cachedRecurringParents;
   List<Task> get recurringParents {
     if (_cachedRecurringParents != null) return _cachedRecurringParents!;
@@ -59,7 +59,7 @@ class TaskProvider extends ChangeNotifier {
     return _cachedRecurringParents!;
   }
 
-  // ⚡ OPTIMIZED ACTIVE RECURRING - O(1) with pre-computed list
+  // OPTIMIZED ACTIVE RECURRING - O(1) with pre-computed list
   List<Task>? _cachedActiveRecurring;
   List<Task> get activeRecurringTasks {
     if (_cachedActiveRecurring != null) return _cachedActiveRecurring!;
@@ -69,13 +69,13 @@ class TaskProvider extends ChangeNotifier {
     return _cachedActiveRecurring!;
   }
 
-  // ⚡ O(1) GROUP LOOKUP
+  // O(1) GROUP LOOKUP
   List<Task> getTasksByRecurringGroup(String groupId) {
     return _recurringGroups[groupId] ?? [];
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 INITIALIZATION - SUB-100MS
+  // INITIALIZATION - SUB-100MS
   // ═══════════════════════════════════════════════════════════
 
   Future<void> initialize() async {
@@ -85,24 +85,24 @@ class TaskProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // ⚡ PARALLEL LOADING
+      // PARALLEL LOADING
       await Future.wait([
         _loadAllTasksInternal(),
         _loadStats(),
       ]);
 
-      // ⚡ BUILD INDEXES (O(n) once, then O(1) forever)
+      // BUILD INDEXES (O(n) once, then O(1) forever)
       _buildAllIndexes();
 
       _isInitialLoadComplete = true;
       _isLoading = false;
 
-      // ⚡ Load selected date from cache
+      // Load selected date from cache
       _dateTaskCache[_selectedDate] = _filterTasksForDateOptimized(_selectedDate);
 
       _startSemesterReminderService();
 
-      // ✅ FIXED: Use post-frame callback to avoid build-phase notifications
+      // Use post-frame callback to avoid build-phase notifications
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_isDisposed) notifyListeners();
       });
@@ -117,7 +117,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // ⚡ BUILD INDEXES - O(n) ONCE
+  // BUILD INDEXES - O(n) ONCE
   // ═══════════════════════════════════════════════════════════
 
   void _buildAllIndexes() {
@@ -134,10 +134,12 @@ class TaskProvider extends ChangeNotifier {
       final dateKey = _getDateKey(task.date);
       tempDateIndex.putIfAbsent(dateKey, () => []).add(task.id!);
 
-      if (task.recurringGroupId != null) {
-        tempRecurringGroups
-            .putIfAbsent(task.recurringGroupId!, () => [])
-            .add(task);
+      // Only add to recurring groups if it has a group ID
+      if (task.recurringGroupId != null && task.recurringGroupId!.isNotEmpty) {
+        if (!tempRecurringGroups.containsKey(task.recurringGroupId!)) {
+          tempRecurringGroups[task.recurringGroupId!] = [];
+        }
+        tempRecurringGroups[task.recurringGroupId!]!.add(task);
       }
     }
 
@@ -150,7 +152,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 LOAD TASKS - STREAM WITH DEBOUNCING
+  // LOAD TASKS - STREAM WITH DEBOUNCING
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _loadAllTasksInternal() async {
@@ -197,7 +199,7 @@ class TaskProvider extends ChangeNotifier {
     _buildAllIndexes();
   }
 
-  // ⚡ O(1) DATE FILTERING WITH CACHE
+  // O(1) DATE FILTERING WITH CACHE
   List<Task> _filterTasksForDateOptimized(DateTime date) {
     final dateKey = _getDateKey(date);
     final taskIds = _dateIndex[dateKey] ?? [];
@@ -212,6 +214,7 @@ class TaskProvider extends ChangeNotifier {
   bool _isTaskVisibleOnDate(Task task, DateTime date) {
     final selectedDate = DateTime(date.year, date.month, date.day);
 
+    // For non-recurring tasks
     if (!task.isRecurring) {
       final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
       if (task.type.hasTimeRange) {
@@ -228,11 +231,15 @@ class TaskProvider extends ChangeNotifier {
       return taskDate.isAtSameMomentAs(selectedDate);
     }
 
+    // For recurring tasks
+    // If it's the parent task, only show on the start date
     if (task.isRecurringParent) {
       final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
       return taskDate.isAtSameMomentAs(selectedDate);
     }
 
+    // For child tasks, check if it should be shown on this date
+    // Skip if the date is skipped
     if (task.isDateSkipped(selectedDate)) return false;
 
     final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
@@ -242,6 +249,7 @@ class TaskProvider extends ChangeNotifier {
     final interval = task.recurrenceFrequency.days;
     if (interval == 0 || daysDifference % interval != 0) return false;
 
+    // Check if within expected end date
     if (task.expectedEndDate != null) {
       final expectedEnd = DateTime(
           task.expectedEndDate!.year,
@@ -251,6 +259,7 @@ class TaskProvider extends ChangeNotifier {
       if (selectedDate.isAfter(expectedEnd)) return false;
     }
 
+    // Check if semester is ended
     if (task.extensionStatus == ExtensionStatus.ended ||
         task.extensionStatus == ExtensionStatus.archived) {
       return false;
@@ -259,7 +268,7 @@ class TaskProvider extends ChangeNotifier {
     return true;
   }
 
-  // ⚡ CACHED DATE TASKS - O(1) after first call
+  // CACHED DATE TASKS - O(1) after first call
   List<Task> _getTasksForDateCached(DateTime date) {
     final key = DateTime(date.year, date.month, date.day);
     if (!_dateTaskCache.containsKey(key)) {
@@ -269,7 +278,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 LOAD DATE - SUB-10MS
+  // LOAD DATE - SUB-10MS
   // ═══════════════════════════════════════════════════════════
 
   Future<void> loadTasksForDate(DateTime date) async {
@@ -286,7 +295,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 CRUD OPERATIONS - SUB-100MS
+  // CRUD OPERATIONS - SUB-100MS
   // ═══════════════════════════════════════════════════════════
 
   Future<Task?> addTask(Task task) async {
@@ -308,6 +317,7 @@ class TaskProvider extends ChangeNotifier {
         _buildAllIndexes();
       }
 
+      // Generate recurring tasks if it's a Sessional Class
       if (task.isRecurring && task.isRecurringParent) {
         unawaited(_generateRecurringTasksOptimized(task));
       }
@@ -331,13 +341,18 @@ class TaskProvider extends ChangeNotifier {
     }
   }
 
-  // ⚡ OPTIMIZED RECURRING GENERATION - BATCH OPERATIONS
+  // OPTIMIZED RECURRING GENERATION - FIXED DUPLICATES
   Future<void> _generateRecurringTasksOptimized(Task parent) async {
     if (!parent.isRecurring || parent.expectedEndDate == null) return;
 
     final allDates = parent.getAllClassDates();
+
+    // Get existing children from the group
     final existingChildren = getTasksByRecurringGroup(parent.recurringGroupId!);
+
+    // Create a set of existing dates (only date part) - exclude parent
     final existingDateSet = existingChildren
+        .where((t) => t.id != parent.id) // Exclude the parent itself
         .map((t) => DateTime(t.date.year, t.date.month, t.date.day))
         .toSet();
 
@@ -345,7 +360,11 @@ class TaskProvider extends ChangeNotifier {
 
     for (var date in allDates) {
       final dateOnly = DateTime(date.year, date.month, date.day);
+
+      // Skip if already exists
       if (existingDateSet.contains(dateOnly)) continue;
+
+      // Skip the parent date
       if (date.year == parent.date.year &&
           date.month == parent.date.month &&
           date.day == parent.date.day) continue;
@@ -355,6 +374,7 @@ class TaskProvider extends ChangeNotifier {
         type: parent.type,
         courseCode: parent.courseCode,
         courseTitle: parent.courseTitle,
+        classType: parent.classType, // Preserve class type
         date: date,
         startTime: parent.startTime != null
             ? DateTime(date.year, date.month, date.day,
@@ -381,8 +401,13 @@ class TaskProvider extends ChangeNotifier {
       ));
     }
 
+    // Create tasks in batches
     for (var newTask in tasksToCreate) {
       await _service.createTask(newTask);
+    }
+
+    if (tasksToCreate.isNotEmpty) {
+      print('📚 Generated ${tasksToCreate.length} recurring tasks for ${parent.displayTitle}');
     }
   }
 
@@ -421,18 +446,25 @@ class TaskProvider extends ChangeNotifier {
     }
   }
 
-  // ⚡ OPTIMIZED REGENERATION - Parallel operations
+  // OPTIMIZED REGENERATION - Fixed to prevent duplicates
   Future<void> _regenerateRecurringTasksOptimized(Task parent) async {
     if (!parent.isRecurringParent || parent.recurringGroupId == null) return;
 
     final existingChildren = getTasksByRecurringGroup(parent.recurringGroupId!);
 
-    await Future.wait(
-        existingChildren
-            .where((child) => child.id != null)
-            .map((child) => _service.deleteTask(child.id!))
-    );
+    // Delete all child tasks (keep only the parent)
+    final childrenToDelete = existingChildren
+        .where((child) => child.id != parent.id && child.id != null)
+        .toList();
 
+    if (childrenToDelete.isNotEmpty) {
+      await Future.wait(
+          childrenToDelete.map((child) => _service.deleteTask(child.id!))
+      );
+      print('🗑️ Deleted ${childrenToDelete.length} old recurring tasks');
+    }
+
+    // Generate new ones
     await _generateRecurringTasksOptimized(parent);
   }
 
@@ -522,7 +554,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 SEMESTER OPERATIONS - OPTIMIZED
+  // SEMESTER OPERATIONS - OPTIMIZED
   // ═══════════════════════════════════════════════════════════
 
   Future<Task?> extendSemester(Task task) async {
@@ -567,7 +599,7 @@ class TaskProvider extends ChangeNotifier {
     }
   }
 
-  // ⚡ OPTIMIZED EXTENDED CLASSES GENERATION
+  // OPTIMIZED EXTENDED CLASSES GENERATION
   Future<void> _generateExtendedClassesOptimized(Task parent) async {
     if (parent.expectedEndDate == null) return;
 
@@ -590,6 +622,7 @@ class TaskProvider extends ChangeNotifier {
         type: parent.type,
         courseCode: parent.courseCode,
         courseTitle: parent.courseTitle,
+        classType: parent.classType,
         date: date,
         startTime: parent.startTime != null
             ? DateTime(date.year, date.month, date.day,
@@ -741,10 +774,10 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 STATS - O(1) WITH PRE-COMPUTED VALUES
+  // STATS - O(1) WITH PRE-COMPUTED VALUES
   // ═══════════════════════════════════════════════════════════
 
-  // ⚡ PRE-COMPUTED STATS
+  // PRE-COMPUTED STATS
   int _cachedCompletedCount = -1;
   int _cachedPendingCount = -1;
   int _cachedOverdueCount = -1;
@@ -779,7 +812,7 @@ class TaskProvider extends ChangeNotifier {
     return _tasksMap.values.where((t) => t.type == type && t.isDone).length;
   }
 
-  // ⚡ O(1) DATE COUNTS
+  // O(1) DATE COUNTS
   int getTaskCountForDate(DateTime date) {
     return _getTasksForDateCached(date).length;
   }
@@ -811,7 +844,7 @@ class TaskProvider extends ChangeNotifier {
   bool hasDeadlineTasksOnDate(DateTime date) => getDeadlineTasksCountForDate(date) > 0;
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 REFRESH - SUB-200MS
+  // REFRESH - SUB-200MS
   // ═══════════════════════════════════════════════════════════
 
   Future<void> refreshAll() async {
@@ -836,7 +869,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 CACHE INVALIDATION
+  // CACHE INVALIDATION
   // ═══════════════════════════════════════════════════════════
 
   void _invalidateDateCache() {
@@ -849,7 +882,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 SEMESTER REMINDER - OPTIMIZED
+  // SEMESTER REMINDER - OPTIMIZED
   // ═══════════════════════════════════════════════════════════
 
   Timer? _semesterReminderTimer;
@@ -912,7 +945,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 ADDITIONAL OPTIMIZED METHODS
+  // ADDITIONAL OPTIMIZED METHODS
   // ═══════════════════════════════════════════════════════════
 
   Future<void> _loadStats() async {
@@ -1074,7 +1107,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🚀 DISPOSE - Clean up resources
+  // DISPOSE - Clean up resources
   // ═══════════════════════════════════════════════════════════
 
   @override

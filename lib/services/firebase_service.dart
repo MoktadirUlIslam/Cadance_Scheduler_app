@@ -196,6 +196,40 @@ class FirebaseService {
   }
 
   // ────────────────────────────────────────────────
+  // ✅ NEW: GET USER BY EMAIL
+  // ────────────────────────────────────────────────
+
+  /// Check if a user exists with the given email
+  Future<DocumentSnapshot?> getUserByEmail(String email) async {
+    try {
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: email.trim())
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isNotEmpty) {
+        return querySnapshot.docs.first;
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting user by email: $e');
+      return null;
+    }
+  }
+
+  /// Check if email exists in Firestore
+  Future<bool> emailExists(String email) async {
+    try {
+      final userDoc = await getUserByEmail(email);
+      return userDoc != null;
+    } catch (e) {
+      print('❌ Error checking email existence: $e');
+      return false;
+    }
+  }
+
+  // ────────────────────────────────────────────────
   // TIMER STATS - DATA OPERATIONS
   // ────────────────────────────────────────────────
 

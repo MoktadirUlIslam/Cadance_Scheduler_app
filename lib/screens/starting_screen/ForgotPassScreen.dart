@@ -17,6 +17,7 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   bool _emailSent = false;
+  String? _errorMessage;
 
   late final AnimationController _animationController;
   late final Animation<double> _fadeAnimation;
@@ -54,25 +55,39 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
     super.dispose();
   }
 
+  // ✅ UPDATED: Handle reset password with email check
   Future<void> _handleResetPassword() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final email = _emailController.text.trim();
     final authProvider = context.read<UserAuthProvider>();
-    final success = await authProvider.resetPassword(
-      _emailController.text.trim(),
-    );
+
+    // Show loading state
+    setState(() {
+      _errorMessage = null;
+    });
+
+    // Call the new method with email check
+    final result = await authProvider.resetPasswordWithCheck(email);
 
     if (!mounted) return;
 
-    if (success) {
+    if (result['success'] == true) {
       setState(() {
         _emailSent = true;
+        _errorMessage = null;
       });
     } else {
+      setState(() {
+        _errorMessage = result['error'] ?? 'Failed to send reset email';
+      });
+
+      // Show error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(authProvider.error ?? 'Failed to send reset email'),
+          content: Text(_errorMessage!),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
         ),
       );
     }
@@ -256,7 +271,38 @@ class _ForgotPassScreenState extends State<ForgotPassScreen>
 
           const SizedBox(height: 16),
 
-                 ],
+          // ✅ Show error message if any
+          if (_errorMessage != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: Colors.red.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    color: Colors.red.shade700,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: Colors.red.shade700,
+                        fontSize: 13,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

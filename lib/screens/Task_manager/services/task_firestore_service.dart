@@ -58,7 +58,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get all tasks for the user - ✅ Fixed: Added error handling
+  // Get all tasks for the user
   Stream<List<Task>> getTasks() {
     try {
       return _tasksCollection
@@ -79,7 +79,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks for a specific date - ✅ Fixed: Better filtering
+  // Get tasks for a specific date
   Stream<List<Task>> getTasksForDate(DateTime date) {
     try {
       final startOfDay = DateTime(date.year, date.month, date.day);
@@ -99,22 +99,34 @@ class TaskFirestoreService {
               (taskDate.isBefore(endOfDay) || taskDate.isAtSameMomentAs(endOfDay));
         }).toList();
 
-        // Filter deadline-based tasks that fall on this date
+        // Filter deadline-based tasks
         final deadlineTasks = allTasks.where((task) {
           if (!task.type.hasDeadline || task.deadline == null) return false;
 
-          final taskStartDate = DateTime(task.date.year, task.date.month, task.date.day);
-          final taskDeadline = DateTime(
+          final targetDate = DateTime(date.year, date.month, date.day);
+
+          // For assignments: show ONLY on the deadline date
+          if (task.type == TaskType.assignment) {
+            final taskDeadline = DateTime(
               task.deadline!.year,
               task.deadline!.month,
-              task.deadline!.day
+              task.deadline!.day,
+            );
+            return taskDeadline.isAtSameMomentAs(targetDate);
+          }
+
+          // For other deadline-based tasks (Lab Report, Others): show from start to deadline
+          final taskStartDate = DateTime(task.date.year, task.date.month, task.date.day);
+          final taskDeadline = DateTime(
+            task.deadline!.year,
+            task.deadline!.month,
+            task.deadline!.day,
           );
 
-          // Check if date is between start and deadline (inclusive)
-          final isOnOrAfterStart = date.isAfter(taskStartDate) ||
-              date.isAtSameMomentAs(taskStartDate);
-          final isOnOrBeforeDeadline = date.isBefore(taskDeadline) ||
-              date.isAtSameMomentAs(taskDeadline);
+          final isOnOrAfterStart = targetDate.isAfter(taskStartDate) ||
+              targetDate.isAtSameMomentAs(taskStartDate);
+          final isOnOrBeforeDeadline = targetDate.isBefore(taskDeadline) ||
+              targetDate.isAtSameMomentAs(taskDeadline);
 
           return isOnOrAfterStart && isOnOrBeforeDeadline;
         }).toList();
@@ -169,7 +181,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks for a date range - ✅ Fixed: Better filtering
+  // Get tasks for a date range
   Stream<List<Task>> getTasksForDateRange(DateTime start, DateTime end) {
     try {
       final startOfDay = DateTime(start.year, start.month, start.day);
@@ -187,20 +199,32 @@ class TaskFirestoreService {
 
         // Filter tasks that fall within the date range
         final filteredTasks = allTasks.where((task) {
-          // For scheduled tasks (Classes, Exam, Class Test)
+          // For scheduled tasks (Classes, Exam)
           if (task.type.hasTimeRange) {
             final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
             return (taskDate.isAfter(startOfDay) || taskDate.isAtSameMomentAs(startOfDay)) &&
                 (taskDate.isBefore(endOfDay) || taskDate.isAtSameMomentAs(endOfDay));
           }
 
-          // For deadline-based tasks (Assignment, Lab Report, Others)
+          // For deadline-based tasks
           if (task.type.hasDeadline && task.deadline != null) {
-            final taskStartDate = DateTime(task.date.year, task.date.month, task.date.day);
-            final taskDeadline = DateTime(
+            // For assignments: check if deadline is within range
+            if (task.type == TaskType.assignment) {
+              final taskDeadline = DateTime(
                 task.deadline!.year,
                 task.deadline!.month,
-                task.deadline!.day
+                task.deadline!.day,
+              );
+              return (taskDeadline.isAfter(startOfDay) || taskDeadline.isAtSameMomentAs(startOfDay)) &&
+                  (taskDeadline.isBefore(endOfDay) || taskDeadline.isAtSameMomentAs(endOfDay));
+            }
+
+            // For other deadline-based tasks
+            final taskStartDate = DateTime(task.date.year, task.date.month, task.date.day);
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
             );
 
             // Check if date range overlaps with task's active period
@@ -234,7 +258,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks by completion status - ✅ Fixed: Added error handling
+  // Get tasks by completion status
   Stream<List<Task>> getTasksByCompletion(bool isDone) {
     try {
       return _tasksCollection
@@ -256,7 +280,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get overdue tasks - ✅ Fixed: Better handling
+  // Get overdue tasks
   Stream<List<Task>> getOverdueTasks() {
     try {
       final now = DateTime.now();
@@ -295,7 +319,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks by type - ✅ Fixed: Added error handling
+  // Get tasks by type
   Stream<List<Task>> getTasksByType(TaskType type) {
     try {
       return _tasksCollection
@@ -317,7 +341,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get active deadline-based tasks - ✅ Fixed: Better filtering
+  // Get active deadline-based tasks
   Stream<List<Task>> getActiveDeadlineTasks() {
     try {
       final now = DateTime.now();
@@ -350,7 +374,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get upcoming deadline tasks - ✅ Fixed: Better filtering
+  // Get upcoming deadline tasks
   Stream<List<Task>> getUpcomingDeadlineTasks({int days = 7}) {
     try {
       final now = DateTime.now();
@@ -386,7 +410,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks with deadline in range - ✅ Fixed: Better filtering
+  // Get tasks with deadline in range
   Stream<List<Task>> getTasksWithDeadline(DateTime start, DateTime end) {
     try {
       return _tasksCollection
@@ -418,7 +442,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks by course code - ✅ Fixed: Added error handling
+  // Get tasks by course code
   Stream<List<Task>> getTasksByCourse(String courseCode) {
     try {
       return _tasksCollection
@@ -439,7 +463,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get today's tasks count - ✅ Fixed: Better counting
+  // Get today's tasks count
   Future<int> getTodayTasksCount() async {
     try {
       final now = DateTime.now();
@@ -461,17 +485,29 @@ class TaskFirestoreService {
             count++;
           }
         } else if (task.type.hasDeadline && task.deadline != null) {
-          // Deadline-based tasks: check if today is between start and deadline
-          final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
-          final taskDeadline = DateTime(
+          // For assignments: check if deadline is today
+          if (task.type == TaskType.assignment) {
+            final taskDeadline = DateTime(
               task.deadline!.year,
               task.deadline!.month,
-              task.deadline!.day
-          );
+              task.deadline!.day,
+            );
+            if (taskDeadline.isAtSameMomentAs(today)) {
+              count++;
+            }
+          } else {
+            // For other deadline-based tasks: check if today is between start and deadline
+            final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
+            );
 
-          if ((today.isAfter(taskStart) || today.isAtSameMomentAs(taskStart)) &&
-              (today.isBefore(taskDeadline) || today.isAtSameMomentAs(taskDeadline))) {
-            count++;
+            if ((today.isAfter(taskStart) || today.isAtSameMomentAs(taskStart)) &&
+                (today.isBefore(taskDeadline) || today.isAtSameMomentAs(taskDeadline))) {
+              count++;
+            }
           }
         }
       }
@@ -484,7 +520,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get upcoming tasks (next 7 days) - ✅ Fixed: Better filtering
+  // Get upcoming tasks (next 7 days)
   Stream<List<Task>> getUpcomingTasks() {
     try {
       final now = DateTime.now();
@@ -507,12 +543,23 @@ class TaskFirestoreService {
             return (taskDate.isAfter(startOfDay) || taskDate.isAtSameMomentAs(startOfDay)) &&
                 (taskDate.isBefore(endOfDay) || taskDate.isAtSameMomentAs(endOfDay));
           } else if (task.type.hasDeadline && task.deadline != null) {
-            // Deadline-based tasks
-            final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
-            final taskDeadline = DateTime(
+            // For assignments: check if deadline is within range
+            if (task.type == TaskType.assignment) {
+              final taskDeadline = DateTime(
                 task.deadline!.year,
                 task.deadline!.month,
-                task.deadline!.day
+                task.deadline!.day,
+              );
+              return (taskDeadline.isAfter(startOfDay) || taskDeadline.isAtSameMomentAs(startOfDay)) &&
+                  (taskDeadline.isBefore(endOfDay) || taskDeadline.isAtSameMomentAs(endOfDay));
+            }
+
+            // For other deadline-based tasks
+            final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
             );
 
             // Check if task's active period overlaps with next 7 days
@@ -537,7 +584,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Update a task with stats management - ✅ Fixed: Better error handling
+  // Update a task with stats management
   Future<Task> updateTask(Task task) async {
     try {
       if (task.id == null) throw Exception('Task ID is required for update');
@@ -572,7 +619,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Bulk update tasks - ✅ Fixed: Better error handling
+  // Bulk update tasks
   Future<void> updateTasks(List<Task> tasks) async {
     try {
       if (tasks.isEmpty) return;
@@ -593,7 +640,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Delete a task with stats management - ✅ Fixed: Better error handling
+  // Delete a task with stats management
   Future<void> deleteTask(String taskId) async {
     try {
       // Get task before deletion to update stats
@@ -613,7 +660,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get a single task by ID - ✅ Fixed: Better error handling
+  // Get a single task by ID
   Future<Task?> getTask(String taskId) async {
     try {
       final doc = await _tasksCollection.doc(taskId).get();
@@ -627,7 +674,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks count by status - ✅ Fixed: Better counting
+  // Get tasks count by status
   Future<Map<String, int>> getTaskCounts() async {
     try {
       final allTasks = await _tasksCollection.get();
@@ -664,7 +711,7 @@ class TaskFirestoreService {
     }
   }
 
-  // Get tasks by priority - ✅ Fixed: Added error handling
+  // Get tasks by priority
   Stream<List<Task>> getTasksByPriority(Priority priority) {
     try {
       return _tasksCollection
@@ -836,7 +883,18 @@ class TaskFirestoreService {
         if (task.type.hasTimeRange) {
           return task.date.isAfter(weekStart) && task.date.isBefore(weekEnd);
         } else if (task.type.hasDeadline && task.deadline != null) {
-          // Check if task's active period overlaps with week
+          // For assignments: check if deadline is in range
+          if (task.type == TaskType.assignment) {
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
+            );
+            return (taskDeadline.isAfter(weekStart) || taskDeadline.isAtSameMomentAs(weekStart)) &&
+                (taskDeadline.isBefore(weekEnd) || taskDeadline.isAtSameMomentAs(weekEnd));
+          }
+
+          // For other deadline-based tasks
           final taskStart = task.date;
           final taskDeadline = task.deadline!;
           return (taskStart.isBefore(weekEnd) || taskStart.isAtSameMomentAs(weekEnd)) &&
@@ -855,11 +913,24 @@ class TaskFirestoreService {
                 t.date.month == date.month &&
                 t.date.day == date.day;
           } else if (t.type.hasDeadline && t.deadline != null) {
-            final taskStart = DateTime(t.date.year, t.date.month, t.date.day);
-            final taskDeadline = DateTime(
+            // For assignments: check if deadline matches the date
+            if (t.type == TaskType.assignment) {
+              final taskDeadline = DateTime(
                 t.deadline!.year,
                 t.deadline!.month,
-                t.deadline!.day
+                t.deadline!.day,
+              );
+              return taskDeadline.year == date.year &&
+                  taskDeadline.month == date.month &&
+                  taskDeadline.day == date.day;
+            }
+
+            // For other deadline-based tasks
+            final taskStart = DateTime(t.date.year, t.date.month, t.date.day);
+            final taskDeadline = DateTime(
+              t.deadline!.year,
+              t.deadline!.month,
+              t.deadline!.day,
             );
             return (date.isAfter(taskStart) || date.isAtSameMomentAs(taskStart)) &&
                 (date.isBefore(taskDeadline) || date.isAtSameMomentAs(taskDeadline));
@@ -896,6 +967,18 @@ class TaskFirestoreService {
         if (task.type.hasTimeRange) {
           return task.date.isAfter(monthStart) && task.date.isBefore(monthEnd);
         } else if (task.type.hasDeadline && task.deadline != null) {
+          // For assignments: check if deadline is in range
+          if (task.type == TaskType.assignment) {
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
+            );
+            return (taskDeadline.isAfter(monthStart) || taskDeadline.isAtSameMomentAs(monthStart)) &&
+                (taskDeadline.isBefore(monthEnd) || taskDeadline.isAtSameMomentAs(monthEnd));
+          }
+
+          // For other deadline-based tasks
           final taskStart = task.date;
           final taskDeadline = task.deadline!;
           return (taskStart.isBefore(monthEnd) || taskStart.isAtSameMomentAs(monthEnd)) &&
@@ -937,12 +1020,24 @@ class TaskFirestoreService {
                 task.date.month == targetDate.month &&
                 task.date.day == targetDate.day;
           } else if (task.type.hasDeadline && task.deadline != null) {
-            // Deadline-based tasks: check if date is between start and deadline
-            final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
-            final taskDeadline = DateTime(
+            // For assignments: check if deadline matches
+            if (task.type == TaskType.assignment) {
+              final taskDeadline = DateTime(
                 task.deadline!.year,
                 task.deadline!.month,
-                task.deadline!.day
+                task.deadline!.day,
+              );
+              return taskDeadline.year == targetDate.year &&
+                  taskDeadline.month == targetDate.month &&
+                  taskDeadline.day == targetDate.day;
+            }
+
+            // For other deadline-based tasks
+            final taskStart = DateTime(task.date.year, task.date.month, task.date.day);
+            final taskDeadline = DateTime(
+              task.deadline!.year,
+              task.deadline!.month,
+              task.deadline!.day,
             );
 
             return (targetDate.isAfter(taskStart) || targetDate.isAtSameMomentAs(taskStart)) &&
@@ -985,7 +1080,7 @@ class TaskFirestoreService {
     }
   }
 
-  /// ✅ NEW: Check if stats exist
+  /// NEW: Check if stats exist
   Future<bool> statsExist() async {
     try {
       return await _statsService.statsExist();
@@ -995,7 +1090,7 @@ class TaskFirestoreService {
     }
   }
 
-  /// ✅ NEW: Get stats with timestamp
+  /// NEW: Get stats with timestamp
   Future<Map<String, dynamic>> getStatsWithTimestamp() async {
     try {
       return await _statsService.getStatsWithTimestamp();
@@ -1005,7 +1100,7 @@ class TaskFirestoreService {
     }
   }
 
-  /// ✅ NEW: Get stats for date range
+  /// NEW: Get stats for date range
   Future<Map<String, dynamic>> getStatsForDateRange(DateTime start, DateTime end) async {
     try {
       return await _statsService.getStatsForDateRange(start, end);
@@ -1015,7 +1110,7 @@ class TaskFirestoreService {
     }
   }
 
-  /// ✅ NEW: Get completion rate
+  /// NEW: Get completion rate
   Future<double> getCompletionRateStats() async {
     try {
       return await _statsService.getCompletionRate();

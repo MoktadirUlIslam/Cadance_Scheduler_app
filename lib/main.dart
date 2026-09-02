@@ -16,6 +16,7 @@ import 'package:pomodoro/screens/starting_screen/splash_screen.dart';
 import 'package:pomodoro/services/ActivityTrackerService.dart';
 import 'package:pomodoro/services/firebase_options.dart';
 import 'package:provider/provider.dart';
+import 'routes/app_routes.dart'; // ✅ Import AppRoutes
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,11 +32,12 @@ void main() async {
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    // ✅ Only set persistence on web platforms
-    // For mobile, Firebase Auth persists automatically
+    // Only set persistence on web platforms
     if (kIsWeb) {
       await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
     }
+
+    print('✅ Firebase initialized successfully');
 
   } catch (e) {
     print('⚠️ Firebase initialization error: $e');
@@ -44,7 +46,7 @@ void main() async {
   runApp(
     MultiProvider(
       providers: [
-        // ✅ Order matters - DataProvider before UserAuthProvider
+        // Order matters - DataProvider before UserAuthProvider
         ChangeNotifierProvider(create: (_) => DataProvider()),
         ChangeNotifierProvider(create: (_) => UserAuthProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
@@ -74,7 +76,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // ✅ Initialize providers after widget tree is built
+    // Initialize providers after widget tree is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initializeProviders();
     });
@@ -157,7 +159,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             fontFamily: 'Roboto',
           ),
           themeMode: themeProvider.themeMode,
-          home: const SplashScreen(),
+          // ✅ Use routes for navigation
+          initialRoute: AppRoutes.splash,
+          routes: AppRoutes.routes,
+          onGenerateRoute: AppRoutes.onGenerateRoute,
           debugShowCheckedModeBanner: false,
         );
       },

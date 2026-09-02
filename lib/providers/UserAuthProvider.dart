@@ -18,36 +18,34 @@ class UserAuthProvider extends ChangeNotifier {
   String? _error;
   bool _isInitialized = false;
   bool _isCheckingSession = false;
+  bool _authChecked = false;
 
   UserModel? get user => _user;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _user != null && _auth.currentUser != null;
   String? get error => _error;
   bool get isInitialized => _isInitialized;
+  bool get authChecked => _authChecked;
 
   UserAuthProvider() {
-    // Initialize auth listener
     _initAuthListener();
-    // Check for existing session immediately
     _checkCurrentUser();
   }
 
   void initialize(DataProvider dataProvider) {
     _dataProvider = dataProvider;
-    // If we already have a user, refresh data
     if (_user != null && _dataProvider != null) {
       _refreshDataProvider();
     }
-    // Notify listeners that data provider is now available
     notifyListeners();
   }
 
   Future<void> _checkCurrentUser() async {
-    // Remove the _dataProvider null check from here
     if (_isCheckingSession) return;
 
     _isLoading = true;
     _isCheckingSession = true;
+    _authChecked = false;
     notifyListeners();
 
     try {
@@ -55,12 +53,10 @@ class UserAuthProvider extends ChangeNotifier {
 
       if (currentUser != null) {
         try {
-          // Force token refresh
           await currentUser.getIdToken(true);
           _user = UserModel.fromFirebaseUser(currentUser);
           print('✅ Auth session restored for: ${_user?.email}');
 
-          // Try to refresh data provider if available
           if (_dataProvider != null) {
             await _refreshDataProvider();
           } else {
@@ -82,13 +78,13 @@ class UserAuthProvider extends ChangeNotifier {
       _isLoading = false;
       _isCheckingSession = false;
       _isInitialized = true;
+      _authChecked = true;
       notifyListeners();
     }
   }
 
   void _initAuthListener() {
     _firebaseService.authStateChanges.listen((User? firebaseUser) async {
-      // Don't process if we're already checking session
       if (_isCheckingSession) return;
 
       try {
@@ -119,6 +115,7 @@ class UserAuthProvider extends ChangeNotifier {
       } finally {
         _isInitialized = true;
         _isLoading = false;
+        _authChecked = true;
         notifyListeners();
       }
     });
@@ -140,12 +137,83 @@ class UserAuthProvider extends ChangeNotifier {
 
   Future<void> _clearDataProvider() async {
     if (_dataProvider == null) return;
-
     try {
-      // Add clear method if needed
       print('✅ DataProvider cleared');
     } catch (e) {
       print('❌ Error clearing data provider: $e');
+    }
+  }
+
+  // ✅ NEW: Check if email exists in database
+  Future<bool> checkEmailExists(String email) async {
+    try {
+      final userDoc = await _firebaseService.getUserByEmail(email);
+      return userDoc != null;
+    } catch (e) {
+      print('❌ Error checking email existence: $e');
+      return false;
+    }
+  }
+
+  // ✅ UPDATED: Reset password with email existence check
+  Future<Map<String, dynamic>> resetPasswordWithCheck(String email) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      // Step 1: Check if email exists in database
+      final emailExists = await checkEmailExists(email);
+
+      if (!emailExists) {
+        _isLoading = false;
+        notifyListeners();
+        return {
+          'success': false,
+          'error': 'Email not found. Please check your email address.',
+        };
+      }
+
+      // Step 2: Email exists, send reset link
+      await _firebaseService.resetPassword(email);
+      _isLoading = false;
+      notifyListeners();
+      print('✅ Password reset email sent to: $email');
+      return {
+        'success': true,
+        'message': 'Password reset link sent to your email.',
+      };
+
+    } catch (e) {
+      _error = e.toString().replaceFirst('Exception: ', '');
+      _isLoading = false;
+      notifyListeners();
+      print('❌ Password reset failed: $_error');
+      return {
+        'success': false,
+        'error': _error,
+      };
+    }
+  }
+
+  // ✅ Keep old resetPassword method for backward compatibility
+  Future<bool> resetPassword(String email) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _firebaseService.resetPassword(email);
+      _isLoading = false;
+      notifyListeners();
+      print('✅ Password reset email sent to: $email');
+      return true;
+    } catch (e) {
+      _error = e.toString().replaceFirst('Exception: ', '');
+      _isLoading = false;
+      notifyListeners();
+      print('❌ Password reset failed: $_error');
+      return false;
     }
   }
 
@@ -166,7 +234,6 @@ class UserAuthProvider extends ChangeNotifier {
       );
       _user = userModel;
 
-      // Only set persistence on web (mobile handles this automatically)
       if (kIsWeb) {
         await _auth.setPersistence(Persistence.LOCAL);
       }
@@ -175,12 +242,14 @@ class UserAuthProvider extends ChangeNotifier {
       if (_dataProvider != null) {
         await _refreshDataProvider();
       }
+      _authChecked = true;
       notifyListeners();
       print('✅ User signed up successfully: ${userModel.email}');
       return true;
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');
       _isLoading = false;
+      _authChecked = true;
       notifyListeners();
       print('❌ Sign up failed: $_error');
       return false;
@@ -202,7 +271,6 @@ class UserAuthProvider extends ChangeNotifier {
       );
       _user = userModel;
 
-      // Only set persistence on web (mobile handles this automatically)
       if (kIsWeb) {
         await _auth.setPersistence(Persistence.LOCAL);
       }
@@ -211,34 +279,16 @@ class UserAuthProvider extends ChangeNotifier {
       if (_dataProvider != null) {
         await _refreshDataProvider();
       }
+      _authChecked = true;
       notifyListeners();
       print('✅ User signed in successfully: ${userModel.email}');
       return true;
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');
       _isLoading = false;
+      _authChecked = true;
       notifyListeners();
       print('❌ Sign in failed: $_error');
-      return false;
-    }
-  }
-
-  Future<bool> resetPassword(String email) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      await _firebaseService.resetPassword(email);
-      _isLoading = false;
-      notifyListeners();
-      print('✅ Password reset email sent to: $email');
-      return true;
-    } catch (e) {
-      _error = e.toString().replaceFirst('Exception: ', '');
-      _isLoading = false;
-      notifyListeners();
-      print('❌ Password reset failed: $_error');
       return false;
     }
   }
@@ -247,6 +297,7 @@ class UserAuthProvider extends ChangeNotifier {
     try {
       await _firebaseService.signOut();
       _user = null;
+      _authChecked = true;
       await _clearDataProvider();
       notifyListeners();
       print('✅ User signed out successfully');

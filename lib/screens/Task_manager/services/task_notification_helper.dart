@@ -7,13 +7,13 @@ import '../../../services/notification_service.dart';
 import '../../../utilites/app_colors.dart';
 
 class TaskNotificationHelper {
-  // ✅ Use a single instance of NotificationService
+  // Use a single instance of NotificationService
   final NotificationService _notificationService = NotificationService();
 
-  // ✅ Track if initialized
+  // Track if initialized
   bool _isInitialized = false;
 
-  // ✅ Initialize if needed
+  // Initialize if needed
   Future<void> _ensureInitialized() async {
     if (!_isInitialized) {
       await _notificationService.initialize();
@@ -21,7 +21,8 @@ class TaskNotificationHelper {
     }
   }
 
-  // Schedule notifications for a task
+// In scheduleTaskNotifications() method:
+
   Future<void> scheduleTaskNotifications(Task task) async {
     try {
       // Early return if notifications are disabled
@@ -42,11 +43,19 @@ class TaskNotificationHelper {
       // Determine the base time for notifications
       DateTime? baseTime;
 
-      if (task.type == TaskType.assignment || task.type == TaskType.labReport) {
-        // For Assignment and Lab Report, use the deadline
+      if (task.type == TaskType.assignment) {
+        // For Assignment, use the deadline date
         baseTime = task.deadline;
 
-        // If no deadline is set, use the date as fallback
+        // Also schedule a reminder 2 days before the deadline
+        // Add "2 days before" reminder if not already present
+        if (!reminders.contains(ReminderOption.twoDays)) {
+          reminders.add(ReminderOption.twoDays);
+        }
+      } else if (task.type == TaskType.labReport) {
+        // For Lab Report, use the deadline
+        baseTime = task.deadline;
+        // If no deadline, use the date as fallback
         if (baseTime == null) {
           baseTime = task.date;
         }
@@ -66,8 +75,6 @@ class TaskNotificationHelper {
       print('   Reminders: ${reminders.map((r) => r.label).join(', ')}');
 
       int baseId = task.id?.hashCode ?? DateTime.now().millisecondsSinceEpoch;
-
-      // ✅ Use absolute value to avoid negative IDs
       baseId = baseId.abs();
 
       int scheduledCount = 0;
@@ -78,7 +85,6 @@ class TaskNotificationHelper {
 
         // Only schedule if notification time is in the future
         if (notificationTime.isAfter(DateTime.now())) {
-          // ✅ Use different IDs for each reminder
           final notificationId = (baseId + i + 1).abs();
 
           final title = _buildNotificationTitle(task);
@@ -108,7 +114,6 @@ class TaskNotificationHelper {
 
     } catch (e) {
       print('❌ Error scheduling task notifications for "${task.displayTitle}": $e');
-      // Don't rethrow - we want to continue even if scheduling fails
     }
   }
 
@@ -123,7 +128,7 @@ class TaskNotificationHelper {
 
       final title = task.isDone ? '✅ Task Completed!' : '⏳ Task Pending';
 
-      // ✅ Better body formatting
+      // Better body formatting
       final buffer = StringBuffer();
       buffer.writeln(message);
       buffer.writeln();
@@ -142,7 +147,7 @@ class TaskNotificationHelper {
       buffer.writeln();
       buffer.writeln(task.isDone ? '🎉 Great job!' : '💪 Keep going!');
 
-      // ✅ Use a unique ID
+      // Use a unique ID
       final notificationId = DateTime.now().millisecondsSinceEpoch.abs();
 
       await _notificationService.scheduleTaskNotification(
@@ -329,7 +334,7 @@ class TaskNotificationHelper {
       // Schedule next reminder after interval
       final nextReminderTime = DateTime.now().add(interval);
 
-      // ✅ Use a unique ID for the scheduled reminder
+      // Use a unique ID for the scheduled reminder
       final notificationId = (task.id.hashCode + 999).abs();
 
       final buffer = StringBuffer();
@@ -467,14 +472,14 @@ class TaskNotificationHelper {
         if (task.examType != null && task.examType!.isNotEmpty) {
           buffer.writeln('📝 ${task.examType}');
         }
-        break;
-
-      case TaskType.classTest:
-        if (task.classTestNo != null && task.classTestNo!.isNotEmpty) {
-          buffer.writeln('📝 Test #${task.classTestNo}');
-        }
-        if (task.testTopic != null && task.testTopic!.isNotEmpty) {
-          buffer.writeln('📖 ${task.testTopic}');
+        // Class Test details (when examType is "Class Test")
+        if (task.examType == 'Class Test') {
+          if (task.classTestNo != null && task.classTestNo!.isNotEmpty) {
+            buffer.writeln('📝 Test #${task.classTestNo}');
+          }
+          if (task.testTopic != null && task.testTopic!.isNotEmpty) {
+            buffer.writeln('📖 ${task.testTopic}');
+          }
         }
         break;
 
@@ -492,7 +497,7 @@ class TaskNotificationHelper {
         break;
     }
 
-    // Time (if available) - for Classes, Exam, Class Test
+    // Time (if available) - for Classes and Exam
     if (task.startTime != null && task.endTime != null) {
       buffer.writeln('⏰ ${_formatTime(task.startTime!)} - ${_formatTime(task.endTime!)}');
     }
@@ -542,14 +547,12 @@ class TaskNotificationHelper {
         return '🔬';
       case TaskType.exam:
         return '📚';
-      case TaskType.classTest:
-        return '📝';
       case TaskType.others:
         return '📌';
     }
   }
 
-  // ✅ New method: Clear all notifications
+  // New method: Clear all notifications
   Future<void> clearAllNotifications() async {
     try {
       await _ensureInitialized();
@@ -560,12 +563,12 @@ class TaskNotificationHelper {
     }
   }
 
-  // ✅ New method: Check if notifications are enabled
+  // New method: Check if notifications are enabled
   bool areNotificationsEnabled(Task task) {
     return task.alarmOn && task.reminders.isNotEmpty;
   }
 
-  // ✅ New method: Get next reminder time for a task
+  // New method: Get next reminder time for a task
   DateTime? getNextReminderTime(Task task) {
     if (!task.alarmOn || task.reminders.isEmpty) return null;
 

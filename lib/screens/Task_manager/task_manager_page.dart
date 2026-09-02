@@ -15,12 +15,12 @@ import 'components/weekly_calendar.dart';
 import 'providers/task_provider.dart';
 import 'services/task_notification_helper.dart';
 
+// FilterType enum - removed classTest
 enum FilterType {
   all,
   exam,
   assignment,
   labReport,
-  classTest,
   classes,
   highPriority,
   mediumPriority,
@@ -173,11 +173,10 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   Widget _buildFilterChips() {
     final filters = [
       {'label': 'All', 'type': FilterType.all, 'icon': Icons.all_inclusive},
-      {'label': '🏫 Classes', 'type': FilterType.classes, 'icon': Icons.class_},
+      {'label': '🏫 Class', 'type': FilterType.classes, 'icon': Icons.class_},  // Shows as "Class"
       {'label': '📚 Exam', 'type': FilterType.exam, 'icon': Icons.quiz},
       {'label': '📝 Assignment', 'type': FilterType.assignment, 'icon': Icons.assignment},
       {'label': '🔬 Lab', 'type': FilterType.labReport, 'icon': Icons.science},
-      {'label': '📝 Test', 'type': FilterType.classTest, 'icon': Icons.school},
       {'label': '🔴 High', 'type': FilterType.highPriority, 'icon': Icons.priority_high},
       {'label': '🟡 Medium', 'type': FilterType.mediumPriority, 'icon': Icons.remove},
       {'label': '🟢 Low', 'type': FilterType.lowPriority, 'icon': Icons.low_priority},
@@ -337,8 +336,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
           return task.type == TaskType.assignment;
         case FilterType.labReport:
           return task.type == TaskType.labReport;
-        case FilterType.classTest:
-          return task.type == TaskType.classTest;
         case FilterType.highPriority:
           return task.priority == Priority.high;
         case FilterType.mediumPriority:
@@ -684,7 +681,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 12),
 
-                          // ✅ Time (for Classes) - Updated with AM/PM
+                          // Time (for Classes) - Updated with AM/PM
                           if (task.type == TaskType.classes && task.startTime != null && task.endTime != null)
                             _buildDetailItem(
                               icon: Icons.access_time,
@@ -739,8 +736,8 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 12),
 
-                          // Class Test
-                          if (task.type == TaskType.classTest) ...[
+                          // Class Test details (when exam is Class Test)
+                          if (task.type == TaskType.exam && task.examType == 'Class Test') ...[
                             if (task.classTestNo != null && task.classTestNo!.isNotEmpty)
                               _buildDetailItem(
                                 icon: Icons.numbers,
@@ -801,7 +798,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 24),
 
-                          // Action Buttons - NO UNDO BUTTON
+                          // Action Buttons
                           Row(
                             children: [
                               // Only show Edit button for pending tasks
@@ -863,81 +860,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
-  Widget _buildStatusToggleButton(Task task) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: task.isDone
-            ? Colors.green.withOpacity(0.08)
-            : (_isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.shade50),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: task.isDone
-              ? Colors.green.withOpacity(0.3)
-              : (_isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.shade200),
-        ),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Icon(
-                task.isDone ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: task.isDone ? Colors.green : Colors.grey,
-                size: 24,
-              ),
-              const SizedBox(width: 12),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Task Status',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: _isDarkMode ? Colors.white : AppColors.ink,
-                    ),
-                  ),
-                  Text(
-                    task.isDone
-                        ? (task.type == TaskType.assignment ? 'Submitted ✓' : 'Completed ✓')
-                        : 'Pending ⏳',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: task.isDone ? Colors.green : (_isDarkMode ? Colors.white54 : AppColors.inkSoft),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _handleToggleComplete(task);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: task.isDone ? Colors.orange : Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-            ),
-            child: Text(
-              task.isDone ? 'Undo' : (task.type == TaskType.assignment ? 'Submit' : 'Mark Done'),
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // Enhanced detail item builder with icon
   Widget _buildDetailItem({
     required IconData icon,
@@ -996,7 +918,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
-  // ✅ Updated _formatTimeRange with AM/PM
+  // Updated _formatTimeRange with AM/PM
   String _formatTimeRangeWithAmPm(DateTime start, DateTime end) {
     final format = (DateTime t) {
       final hour = t.hour;
@@ -1008,7 +930,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     return '${format(start)} - ${format(end)}';
   }
 
-  // ✅ Keep old method for backward compatibility (if needed)
+  // Keep old method for backward compatibility (if needed)
   String _formatTimeRange(DateTime start, DateTime end) {
     final startStr = '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
     final endStr = '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
@@ -1055,7 +977,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     final assignments = tasks.where((t) => t.type == TaskType.assignment).length;
     final labReports = tasks.where((t) => t.type == TaskType.labReport).length;
     final exams = tasks.where((t) => t.type == TaskType.exam).length;
-    final classTests = tasks.where((t) => t.type == TaskType.classTest).length;
     final others = tasks.where((t) => t.type == TaskType.others).length;
 
     // Count completed
@@ -1074,7 +995,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
             _buildStatRow('📚 Exam', exams, AppColors.accentLight),
             _buildStatRow('📝 Assignment', assignments, AppColors.purple),
             _buildStatRow('🔬 Lab Report', labReports, AppColors.successLight),
-            _buildStatRow('📝 Class Test', classTests, AppColors.warningLight),
             _buildStatRow('🏫 Classes', classes, AppColors.primaryLight),
             _buildStatRow('📌 Others', others, Colors.grey),
             const Divider(),

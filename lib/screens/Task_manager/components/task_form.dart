@@ -33,11 +33,18 @@ class _TaskFormState extends State<TaskForm> {
   late List<ReminderOption> _selectedReminders;
   late bool _alarmOn;
   late DateTime? _deadline;
+  late TimeOfDay? _submissionTime;
 
   // Recurring fields
   late RecurrenceFrequency _recurrenceFrequency;
   late DateTime? _expectedEndDate;
   late bool _isRecurring;
+
+  // Exam subtype
+  late ExamSubtype _examSubtype;
+
+  // Class subtype
+  late ClassSubtype _classSubtype;
 
   // Text controllers
   final TextEditingController _titleController = TextEditingController();
@@ -71,9 +78,24 @@ class _TaskFormState extends State<TaskForm> {
       _selectedReminders = List.from(task.reminders);
       _alarmOn = task.alarmOn;
       _deadline = task.deadline;
+      _submissionTime = task.submissionTime != null
+          ? TimeOfDay.fromDateTime(task.submissionTime!)
+          : null;
       _recurrenceFrequency = task.recurrenceFrequency;
       _expectedEndDate = task.expectedEndDate;
       _isRecurring = task.isRecurring;
+
+      if (task.type == TaskType.exam) {
+        _examSubtype = _getExamSubtypeFromTask(task);
+      } else {
+        _examSubtype = ExamSubtype.classTest;
+      }
+
+      if (task.type == TaskType.classes) {
+        _classSubtype = _getClassSubtypeFromTask(task);
+      } else {
+        _classSubtype = ClassSubtype.regular;
+      }
     } else {
       _taskType = TaskType.classes;
       _date = widget.selectedDate;
@@ -85,11 +107,32 @@ class _TaskFormState extends State<TaskForm> {
       _selectedReminders = [];
       _alarmOn = true;
       _deadline = DateTime.now().add(const Duration(days: 7));
+      _submissionTime = TimeOfDay(hour: 23, minute: 59);
 
       _recurrenceFrequency = RecurrenceFrequency.none;
       _expectedEndDate = null;
       _isRecurring = false;
+      _examSubtype = ExamSubtype.classTest;
+      _classSubtype = ClassSubtype.regular;
     }
+  }
+
+  ExamSubtype _getExamSubtypeFromTask(Task task) {
+    final examType = task.examType?.toLowerCase() ?? '';
+    if (examType.contains('mid') || examType.contains('midterm')) {
+      return ExamSubtype.midterm;
+    } else if (examType.contains('final')) {
+      return ExamSubtype.finalExam;
+    }
+    return ExamSubtype.classTest;
+  }
+
+  ClassSubtype _getClassSubtypeFromTask(Task task) {
+    final classType = task.classType?.toLowerCase() ?? '';
+    if (classType.contains('sessional')) {
+      return ClassSubtype.sessional;
+    }
+    return ClassSubtype.regular;
   }
 
   void _initializeControllers() {
@@ -164,6 +207,7 @@ class _TaskFormState extends State<TaskForm> {
   List<FormFieldConfig> _buildFormFields() {
     final fields = <FormFieldConfig>[];
 
+    // Task Type Selector
     fields.add(
       FormFieldConfig(
         key: 'taskType',
@@ -172,6 +216,7 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
+    // Title field for Assignment and Others
     if (_taskType.hasTitle) {
       fields.add(
         FormFieldConfig(
@@ -186,6 +231,7 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
+    // Course details for most types (except Others)
     if (_taskType.hasCourseDetails) {
       fields.add(
         FormFieldConfig(
@@ -209,25 +255,34 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
-    if (_taskType.hasTimeRange) {
+    // ========== CLASS TYPE SPECIFIC FIELDS ==========
+    if (_taskType == TaskType.classes) {
       fields.add(
         FormFieldConfig(
-          key: 'date',
+          key: 'classSubtype',
           type: FormFieldType.custom,
-          customWidget: _buildDatePickerWithRecurring(),
+          customWidget: _buildClassSubtypeSelector(),
         ),
       );
-    } else {
-      fields.add(
-        FormFieldConfig(
-          key: 'date',
-          type: FormFieldType.custom,
-          customWidget: _buildFixedDateDisplay(),
-        ),
-      );
-    }
 
-    if (_taskType.hasTimeRange) {
+      if (_classSubtype == ClassSubtype.sessional) {
+        fields.add(
+          FormFieldConfig(
+            key: 'date',
+            type: FormFieldType.custom,
+            customWidget: _buildDatePickerWithRecurring(),
+          ),
+        );
+      } else {
+        fields.add(
+          FormFieldConfig(
+            key: 'date',
+            type: FormFieldType.custom,
+            customWidget: _buildDatePicker(),
+          ),
+        );
+      }
+
       fields.add(
         FormFieldConfig(
           key: 'timeRange',
@@ -235,22 +290,16 @@ class _TaskFormState extends State<TaskForm> {
           customWidget: _buildTimeRangePicker(),
         ),
       );
-    }
-
-    if (_taskType.hasLocation) {
       fields.add(
         FormFieldConfig(
           key: 'location',
           type: FormFieldType.text,
-          hint: 'Location / Room',
+          hint: 'Room No',
           prefixIcon: Icons.location_on,
           initialValue: _locationController.text,
           keyboardType: TextInputType.text,
         ),
       );
-    }
-
-    if (_taskType.hasTeacher) {
       fields.add(
         FormFieldConfig(
           key: 'teacherName',
@@ -263,56 +312,171 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
+    // ========== EXAM TYPE SPECIFIC FIELDS ==========
+    if (_taskType == TaskType.exam) {
+      fields.add(
+        FormFieldConfig(
+          key: 'examSubtype',
+          type: FormFieldType.custom,
+          customWidget: _buildExamSubtypeSelector(),
+        ),
+      );
+
+      if (_examSubtype == ExamSubtype.classTest) {
+        fields.add(
+          FormFieldConfig(
+            key: 'classTestNo',
+            type: FormFieldType.text,
+            hint: 'Test No (e.g., 1, 2, 3)',
+            prefixIcon: Icons.numbers,
+            initialValue: _classTestNoController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'testTopic',
+            type: FormFieldType.text,
+            hint: 'Test Topic',
+            prefixIcon: Icons.topic,
+            initialValue: _testTopicController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'date',
+            type: FormFieldType.custom,
+            customWidget: _buildDatePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'timeRange',
+            type: FormFieldType.custom,
+            customWidget: _buildTimeRangePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'location',
+            type: FormFieldType.text,
+            hint: 'Room No',
+            prefixIcon: Icons.location_on,
+            initialValue: _locationController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'teacherName',
+            type: FormFieldType.text,
+            hint: 'Teacher Name',
+            prefixIcon: Icons.person,
+            initialValue: _teacherNameController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+      }
+
+      if (_examSubtype == ExamSubtype.midterm) {
+        fields.add(
+          FormFieldConfig(
+            key: 'date',
+            type: FormFieldType.custom,
+            customWidget: _buildDatePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'timeRange',
+            type: FormFieldType.custom,
+            customWidget: _buildTimeRangePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'location',
+            type: FormFieldType.text,
+            hint: 'Room No',
+            prefixIcon: Icons.location_on,
+            initialValue: _locationController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'teacherName',
+            type: FormFieldType.text,
+            hint: 'Teacher Name (Optional)',
+            prefixIcon: Icons.person_outline,
+            initialValue: _teacherNameController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+      }
+
+      if (_examSubtype == ExamSubtype.finalExam) {
+        fields.add(
+          FormFieldConfig(
+            key: 'date',
+            type: FormFieldType.custom,
+            customWidget: _buildDatePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'timeRange',
+            type: FormFieldType.custom,
+            customWidget: _buildTimeRangePicker(),
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'location',
+            type: FormFieldType.text,
+            hint: 'Room No',
+            prefixIcon: Icons.location_on,
+            initialValue: _locationController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+        fields.add(
+          FormFieldConfig(
+            key: 'teacherName',
+            type: FormFieldType.text,
+            hint: 'Teacher Name (Optional)',
+            prefixIcon: Icons.person_outline,
+            initialValue: _teacherNameController.text,
+            keyboardType: TextInputType.text,
+          ),
+        );
+      }
+    }
+
+    // ========== ASSIGNMENT ==========
+    if (_taskType == TaskType.assignment) {
+      fields.add(
+        FormFieldConfig(
+          key: 'deadlineWithTime',
+          type: FormFieldType.custom,
+          customWidget: _buildDeadlineWithTimePicker(),
+        ),
+      );
+      fields.add(
+        FormFieldConfig(
+          key: 'teacherName',
+          type: FormFieldType.text,
+          hint: 'Teacher Name',
+          prefixIcon: Icons.person,
+          initialValue: _teacherNameController.text,
+          keyboardType: TextInputType.text,
+        ),
+      );
+    }
+
+    // ========== LAB REPORT (UPDATED - Only Deadline, no fixed date) ==========
     if (_taskType == TaskType.labReport) {
-      fields.add(
-        FormFieldConfig(
-          key: 'teacherName2',
-          type: FormFieldType.text,
-          hint: 'Second Teacher (Optional)',
-          prefixIcon: Icons.person_outline,
-          initialValue: _teacherName2Controller.text,
-          keyboardType: TextInputType.text,
-        ),
-      );
-    }
-
-    if (_taskType.hasExamType) {
-      fields.add(
-        FormFieldConfig(
-          key: 'examType',
-          type: FormFieldType.text,
-          hint: 'Exam Type (Mid / Final)',
-          prefixIcon: Icons.quiz,
-          initialValue: _examTypeController.text,
-          keyboardType: TextInputType.text,
-        ),
-      );
-    }
-
-    if (_taskType.hasClassTestFields) {
-      fields.add(
-        FormFieldConfig(
-          key: 'classTestNo',
-          type: FormFieldType.text,
-          hint: 'Test No',
-          prefixIcon: Icons.numbers,
-          initialValue: _classTestNoController.text,
-          keyboardType: TextInputType.text,
-        ),
-      );
-      fields.add(
-        FormFieldConfig(
-          key: 'testTopic',
-          type: FormFieldType.text,
-          hint: 'Test Topic',
-          prefixIcon: Icons.topic,
-          initialValue: _testTopicController.text,
-          keyboardType: TextInputType.text,
-        ),
-      );
-    }
-
-    if (_taskType.hasExperimentFields) {
       fields.add(
         FormFieldConfig(
           key: 'experimentNo',
@@ -333,9 +497,40 @@ class _TaskFormState extends State<TaskForm> {
           keyboardType: TextInputType.text,
         ),
       );
+      // Only show deadline picker (no fixed date display)
+      fields.add(
+        FormFieldConfig(
+          key: 'deadline',
+          type: FormFieldType.custom,
+          customWidget: _buildDeadlinePicker(),
+        ),
+      );
+      fields.add(
+        FormFieldConfig(
+          key: 'teacherName',
+          type: FormFieldType.text,
+          hint: 'Teacher Name',
+          prefixIcon: Icons.person,
+          initialValue: _teacherNameController.text,
+          keyboardType: TextInputType.text,
+        ),
+      );
+      fields.add(
+        FormFieldConfig(
+          key: 'teacherName2',
+          type: FormFieldType.text,
+          hint: 'Second Teacher (Optional)',
+          prefixIcon: Icons.person_outline,
+          initialValue: _teacherName2Controller.text,
+          keyboardType: TextInputType.text,
+        ),
+      );
     }
 
-    if (_taskType.hasDeadline) {
+    // ========== OTHERS (UPDATED - Only Deadline, no fixed date) ==========
+    if (_taskType == TaskType.others) {
+      // Title is already added above
+      // Only show deadline picker (no fixed date display)
       fields.add(
         FormFieldConfig(
           key: 'deadline',
@@ -345,6 +540,8 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
+    // ========== COMMON FIELDS ==========
+    // Priority
     fields.add(
       FormFieldConfig(
         key: 'priority',
@@ -353,6 +550,7 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
+    // Reminders
     fields.add(
       FormFieldConfig(
         key: 'reminders',
@@ -361,6 +559,7 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
+    // Alarm
     fields.add(
       FormFieldConfig(
         key: 'alarm',
@@ -369,6 +568,7 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
+    // Description
     fields.add(
       FormFieldConfig(
         key: 'description',
@@ -381,6 +581,295 @@ class _TaskFormState extends State<TaskForm> {
     );
 
     return fields;
+  }
+
+  // ==================== CLASS SUBTYPE SELECTOR ====================
+
+  Widget _buildClassSubtypeSelector() {
+    final isDarkMode = widget.isDarkMode;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel('Class Type', isDarkMode),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ClassSubtype.values.map((subtype) {
+              final isSelected = _classSubtype == subtype;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _classSubtype = subtype;
+                    if (subtype == ClassSubtype.regular) {
+                      _isRecurring = false;
+                      _recurrenceFrequency = RecurrenceFrequency.none;
+                      _expectedEndDate = null;
+                    }
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.primaryLight.withOpacity(0.1)
+                        : (isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.05)),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppColors.primaryLight
+                          : (isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.withOpacity(0.2)),
+                      width: isSelected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        subtype.icon,
+                        size: 18,
+                        color: isSelected ? AppColors.primaryLight : subtype.color,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        subtype.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: isSelected ? AppColors.primaryLight : subtype.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ==================== DEADLINE WITH TIME PICKER ====================
+
+  Widget _buildDeadlineWithTimePicker() {
+    final isDarkMode = widget.isDarkMode;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel('Submission Deadline', isDarkMode),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              flex: 1,
+              child: _buildSimpleDatePicker(),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 1,
+              child: _buildSimpleTimePicker(),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: AppColors.primaryLight.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.info_outline, size: 14, color: AppColors.primaryLight),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Shows on schedule 2 days before deadline',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.primaryLight,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSimpleDatePicker() {
+    final isDarkMode = widget.isDarkMode;
+
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: _deadline ?? DateTime.now().add(const Duration(days: 7)),
+          firstDate: DateTime.now(),
+          lastDate: DateTime(2030),
+          builder: (context, child) => Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: ColorScheme.light(
+                primary: AppColors.primaryLight,
+                onPrimary: Colors.white,
+                surface: Colors.white,
+              ),
+            ),
+            child: child!,
+          ),
+        );
+        if (picked != null) setState(() => _deadline = picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDarkMode ? AppColors.darkSurface : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.shade200,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.calendar_today, color: AppColors.primaryLight, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _deadline != null
+                    ? DateFormat('MMM d, yyyy').format(_deadline!)
+                    : 'Select date',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _deadline != null
+                      ? (isDarkMode ? Colors.white : AppColors.ink)
+                      : (isDarkMode ? Colors.white54 : AppColors.inkSoft),
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, color: isDarkMode ? Colors.white54 : AppColors.inkSoft),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSimpleTimePicker() {
+    final isDarkMode = widget.isDarkMode;
+    final time = _submissionTime ?? TimeOfDay(hour: 23, minute: 59);
+
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: time,
+          builder: (context, child) => Theme(
+            data: Theme.of(context).copyWith(
+              colorScheme: ColorScheme.light(primary: AppColors.primaryLight, onPrimary: Colors.white),
+            ),
+            child: child!,
+          ),
+        );
+        if (picked != null) setState(() => _submissionTime = picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDarkMode ? AppColors.darkSurface : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.shade200,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.access_time, color: AppColors.primaryLight, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _formatTimeOfDayWithAmPm(time),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDarkMode ? Colors.white : AppColors.ink,
+                ),
+              ),
+            ),
+            Icon(Icons.arrow_drop_down, color: isDarkMode ? Colors.white54 : AppColors.inkSoft),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== EXAM SUBTYPE SELECTOR ====================
+
+  Widget _buildExamSubtypeSelector() {
+    final isDarkMode = widget.isDarkMode;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel('Exam Type', isDarkMode),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: ExamSubtype.values.map((subtype) {
+              final isSelected = _examSubtype == subtype;
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _examSubtype = subtype;
+                    _examTypeController.clear();
+                  });
+                },
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppColors.primaryLight.withOpacity(0.1)
+                        : (isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.05)),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppColors.primaryLight
+                          : (isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.withOpacity(0.2)),
+                      width: isSelected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        subtype.icon,
+                        size: 18,
+                        color: isSelected ? AppColors.primaryLight : subtype.color,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        subtype.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                          color: isSelected ? AppColors.primaryLight : subtype.color,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+      ],
+    );
   }
 
   // ==================== RECURRING UI ====================
@@ -493,15 +982,12 @@ class _TaskFormState extends State<TaskForm> {
       ),
       child: Row(
         children: [
-          // Icon
           Icon(
             _isRecurring ? Icons.repeat : Icons.repeat_outlined,
             color: _isRecurring ? AppColors.primaryLight : Colors.grey,
             size: 24,
           ),
           const SizedBox(width: 12),
-
-          // Text - Expanded to take available space
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -525,8 +1011,6 @@ class _TaskFormState extends State<TaskForm> {
               ],
             ),
           ),
-
-          // Switch - Fixed size
           Switch(
             value: _isRecurring,
             onChanged: (value) {
@@ -694,124 +1178,96 @@ class _TaskFormState extends State<TaskForm> {
       ],
     );
   }
+
   // ==================== TASK TYPE SELECTOR ====================
 
   Widget _buildTaskTypeSelector() {
     final isDarkMode = widget.isDarkMode;
+    final taskTypes = TaskType.values.toList();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildLabel('Task Type', isDarkMode),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: TaskType.values.map((type) {
-            final isSelected = _taskType == type;
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _taskType = type;
-                  if (type != TaskType.classes) {
-                    _isRecurring = false;
-                    _recurrenceFrequency = RecurrenceFrequency.none;
-                    _expectedEndDate = null;
-                  }
-                  if (_taskType.hasDeadline && !_taskType.hasTimeRange) {
-                    _date = DateTime.now();
-                    _deadline ??= DateTime.now().add(const Duration(days: 7));
-                  } else {
-                    _date = widget.selectedDate;
-                  }
-                });
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 250),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: isSelected ? type.color : (isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.05)),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isSelected ? type.color : (isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.withOpacity(0.2)),
-                    width: isSelected ? 2 : 1,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(type.icon, size: 16, color: isSelected ? Colors.white : type.color),
-                    const SizedBox(width: 6),
-                    Text(
-                      type.label,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                        color: isSelected ? Colors.white : type.color,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList(),
+        Container(
+          width: double.infinity,
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: taskTypes.map((type) => _buildTypeChip(
+              type: type,
+              label: type.label,
+              isDarkMode: isDarkMode,
+            )).toList(),
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildTypeChip({
+    required TaskType type,
+    required String label,
+    required bool isDarkMode,
+  }) {
+    final isSelected = _taskType == type;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _taskType = type;
+          if (type != TaskType.classes) {
+            _isRecurring = false;
+            _recurrenceFrequency = RecurrenceFrequency.none;
+            _expectedEndDate = null;
+          }
+          if (type == TaskType.exam) {
+            _examSubtype = ExamSubtype.classTest;
+          }
+          if (type == TaskType.classes) {
+            _classSubtype = ClassSubtype.regular;
+          }
+          if (_taskType.hasDeadline && !_taskType.hasTimeRange) {
+            _date = DateTime.now();
+            _deadline ??= DateTime.now().add(const Duration(days: 7));
+          } else {
+            _date = widget.selectedDate;
+          }
+        });
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? type.color : (isDarkMode ? Colors.white.withOpacity(0.05) : Colors.grey.withOpacity(0.05)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? type.color : (isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.withOpacity(0.2)),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(type.icon, size: 16, color: isSelected ? Colors.white : type.color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                color: isSelected ? Colors.white : type.color,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   // ==================== OTHER UI WIDGETS ====================
 
-  Widget _buildFixedDateDisplay() {
-    final isDarkMode = widget.isDarkMode;
-    final now = DateTime.now();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildLabel('Start Date (Fixed)', isDarkMode),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          decoration: BoxDecoration(
-            color: isDarkMode ? AppColors.darkSurface : Colors.grey.shade50,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.shade200,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.calendar_today, color: AppColors.primaryLight, size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      DateFormat('EEEE, MMMM d, yyyy').format(now),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDarkMode ? Colors.white : AppColors.ink,
-                      ),
-                    ),
-                    Text(
-                      'Task starts from today',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDarkMode ? Colors.white54 : AppColors.inkSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(Icons.lock_outline, color: isDarkMode ? Colors.white54 : AppColors.inkSoft, size: 18),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
+  // REMOVED: _buildFixedDateDisplay() - no longer needed for Lab Report
 
   Widget _buildTimeRangePicker() {
     final isDarkMode = widget.isDarkMode;
@@ -835,7 +1291,6 @@ class _TaskFormState extends State<TaskForm> {
     );
   }
 
-  // ✅ Updated _buildTimePicker with AM/PM display
   Widget _buildTimePicker(String label, TimeOfDay time, Function(TimeOfDay) onChanged) {
     final isDarkMode = widget.isDarkMode;
     return GestureDetector(
@@ -867,7 +1322,6 @@ class _TaskFormState extends State<TaskForm> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ✅ Show time with AM/PM
                   Text(
                     _formatTimeOfDayWithAmPm(time),
                     style: TextStyle(
@@ -876,7 +1330,13 @@ class _TaskFormState extends State<TaskForm> {
                       color: isDarkMode ? Colors.white : AppColors.ink,
                     ),
                   ),
-                  Text(label, style: TextStyle(fontSize: 11, color: isDarkMode ? Colors.white54 : AppColors.inkSoft)),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDarkMode ? Colors.white54 : AppColors.inkSoft,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -887,7 +1347,6 @@ class _TaskFormState extends State<TaskForm> {
     );
   }
 
-  // ✅ Helper method to format TimeOfDay with AM/PM
   String _formatTimeOfDayWithAmPm(TimeOfDay time) {
     final hour = time.hour;
     final minute = time.minute.toString().padLeft(2, '0');
@@ -1204,11 +1663,50 @@ class _TaskFormState extends State<TaskForm> {
       _selectedReminders = [ReminderOption.oneDay, ReminderOption.twoHours];
     }
 
-    final effectiveDate = (_taskType.hasDeadline && !_taskType.hasTimeRange) ? DateTime.now() : _date;
+    // For assignments, lab reports, and others, use the deadline date as the display date
+    // For other types, use the appropriate date
+    DateTime effectiveDate;
+    if ((_taskType == TaskType.assignment || _taskType == TaskType.labReport || _taskType == TaskType.others) && _deadline != null) {
+      effectiveDate = DateTime(
+        _deadline!.year,
+        _deadline!.month,
+        _deadline!.day,
+      );
+      if (_taskType == TaskType.assignment && !_selectedReminders.contains(ReminderOption.twoDays)) {
+        _selectedReminders.add(ReminderOption.twoDays);
+      }
+    } else if (_taskType.hasDeadline && !_taskType.hasTimeRange) {
+      effectiveDate = DateTime.now();
+    } else {
+      effectiveDate = _date;
+    }
 
     String? recurringGroupId;
-    if (_isRecurring && _taskType == TaskType.classes) {
+    if (_isRecurring && _taskType == TaskType.classes && _classSubtype == ClassSubtype.sessional) {
       recurringGroupId = DateTime.now().millisecondsSinceEpoch.toString();
+    }
+
+    String? finalExamType;
+    if (_taskType == TaskType.exam) {
+      finalExamType = _examSubtype.label;
+    }
+
+    String? classTypeLabel;
+    if (_taskType == TaskType.classes) {
+      classTypeLabel = _classSubtype.label;
+    }
+
+    // Build submission deadline with time for assignments
+    DateTime? submissionDateTime;
+    if (_taskType == TaskType.assignment && _deadline != null) {
+      final time = _submissionTime ?? TimeOfDay(hour: 23, minute: 59);
+      submissionDateTime = DateTime(
+        _deadline!.year,
+        _deadline!.month,
+        _deadline!.day,
+        time.hour,
+        time.minute,
+      );
     }
 
     final task = Task(
@@ -1219,37 +1717,86 @@ class _TaskFormState extends State<TaskForm> {
       courseCode: _taskType.hasCourseDetails ? (courseCode.isNotEmpty ? courseCode : null) : null,
       courseTitle: _taskType.hasCourseDetails ? (courseTitle.isNotEmpty ? courseTitle : null) : null,
       date: effectiveDate,
-      startTime: _taskType.hasTimeRange
+      startTime: (_taskType.hasTimeRange || _taskType == TaskType.exam)
           ? DateTime(effectiveDate.year, effectiveDate.month, effectiveDate.day, _startTime.hour, _startTime.minute)
           : null,
-      endTime: _taskType.hasTimeRange
+      endTime: (_taskType.hasTimeRange || _taskType == TaskType.exam)
           ? DateTime(effectiveDate.year, effectiveDate.month, effectiveDate.day, _endTime.hour, _endTime.minute)
           : null,
       priority: _priority,
-      location: _taskType.hasLocation ? (location.isNotEmpty ? location : null) : null,
+      location: (_taskType.hasLocation || _taskType == TaskType.exam) ? (location.isNotEmpty ? location : null) : null,
       teacherName: _taskType.hasTeacher ? (teacherName.isNotEmpty ? teacherName : null) : null,
       teacherName2: _taskType == TaskType.labReport ? (teacherName2.isNotEmpty ? teacherName2 : null) : null,
       reminders: _selectedReminders,
       alarmOn: _alarmOn,
       deadline: _taskType.hasDeadline ? _deadline : null,
+      submissionTime: _taskType == TaskType.assignment ? submissionDateTime : null,
       description: description.isNotEmpty ? description : null,
-      examType: _taskType == TaskType.exam ? (examType.isNotEmpty ? examType : null) : null,
-      classTestNo: _taskType == TaskType.classTest ? (classTestNo.isNotEmpty ? classTestNo : null) : null,
-      testTopic: _taskType == TaskType.classTest ? (testTopic.isNotEmpty ? testTopic : null) : null,
+      examType: _taskType == TaskType.exam ? finalExamType : null,
+      classTestNo: _taskType == TaskType.exam && _examSubtype == ExamSubtype.classTest
+          ? (classTestNo.isNotEmpty ? classTestNo : null)
+          : null,
+      testTopic: _taskType == TaskType.exam && _examSubtype == ExamSubtype.classTest
+          ? (testTopic.isNotEmpty ? testTopic : null)
+          : null,
       experimentNo: _taskType == TaskType.labReport ? (experimentNo.isNotEmpty ? experimentNo : null) : null,
       experimentTitle: _taskType == TaskType.labReport ? (experimentTitle.isNotEmpty ? experimentTitle : null) : null,
+      classType: classTypeLabel,
       recurringGroupId: recurringGroupId,
-      recurrenceFrequency: _isRecurring ? _recurrenceFrequency : RecurrenceFrequency.none,
-      expectedEndDate: _isRecurring ? _expectedEndDate : null,
+      recurrenceFrequency: _isRecurring && _classSubtype == ClassSubtype.sessional ? _recurrenceFrequency : RecurrenceFrequency.none,
+      expectedEndDate: _isRecurring && _classSubtype == ClassSubtype.sessional ? _expectedEndDate : null,
       actualEndDate: null,
-      extensionStatus: _isRecurring ? ExtensionStatus.active : ExtensionStatus.ended,
+      extensionStatus: _isRecurring && _classSubtype == ClassSubtype.sessional ? ExtensionStatus.active : ExtensionStatus.ended,
       extensionCount: 0,
       skippedDates: null,
-      isRecurringParent: _isRecurring,
+      isRecurringParent: _isRecurring && _classSubtype == ClassSubtype.sessional,
       createdAt: widget.initialTask?.createdAt ?? DateTime.now(),
       updatedAt: DateTime.now(),
     );
 
     widget.onSubmit(task);
+  }
+}
+
+// ==================== EXAM SUBTYPE ENUM ====================
+
+enum ExamSubtype {
+  classTest,
+  midterm,
+  finalExam,
+}
+
+extension ExamSubtypeExtension on ExamSubtype {
+  String get label {
+    switch (this) {
+      case ExamSubtype.classTest:
+        return 'Class Test';
+      case ExamSubtype.midterm:
+        return 'Midterm';
+      case ExamSubtype.finalExam:
+        return 'Final Exam';
+    }
+  }
+
+  IconData get icon {
+    switch (this) {
+      case ExamSubtype.classTest:
+        return Icons.school;
+      case ExamSubtype.midterm:
+        return Icons.quiz;
+      case ExamSubtype.finalExam:
+        return Icons.assignment_turned_in;
+    }
+  }
+
+  Color get color {
+    switch (this) {
+      case ExamSubtype.classTest:
+        return AppColors.warningLight;
+      case ExamSubtype.midterm:
+        return AppColors.accentLight;
+      case ExamSubtype.finalExam:
+        return Colors.red;
+    }
   }
 }

@@ -100,7 +100,7 @@ class TaskManagerStatsService {
         case TaskType.exam:
           fieldName = 'totalExamsDone';
           break;
-        case TaskType.classTest:
+        case TaskType.classes:
           fieldName = 'totalExamsDone';
           break;
         case TaskType.others:
@@ -136,7 +136,7 @@ class TaskManagerStatsService {
         case TaskType.exam:
           fieldName = 'totalExamsDone';
           break;
-        case TaskType.classTest:
+        case TaskType.classes:
           fieldName = 'totalExamsDone';
           break;
         case TaskType.others:
