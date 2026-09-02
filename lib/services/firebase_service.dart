@@ -381,9 +381,6 @@ class FirebaseService {
     }
   }
 
-  // ────────────────────────────────────────────────
-  // HEALTH CHECK
-  // ────────────────────────────────────────────────
 
   /// Check if Firebase services are working
   Future<bool> checkFirebaseHealth() async {
