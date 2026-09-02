@@ -385,7 +385,6 @@ class FirebaseService {
   /// Check if Firebase services are working
   Future<bool> checkFirebaseHealth() async {
     try {
-      // Try to access Firestore
       await _firestore.collection('users').limit(1).get();
       return true;
     } catch (e) {
