@@ -13,6 +13,14 @@ class TaskNotificationHelper {
   // Track if initialized
   bool _isInitialized = false;
 
+  /// Initialize the notification helper
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+    await _ensureInitialized();
+    _isInitialized = true;
+    print('✅ TaskNotificationHelper initialized');
+  }
+
   // Initialize if needed
   Future<void> _ensureInitialized() async {
     if (!_isInitialized) {
@@ -20,8 +28,6 @@ class TaskNotificationHelper {
       _isInitialized = true;
     }
   }
-
-// In scheduleTaskNotifications() method:
 
   Future<void> scheduleTaskNotifications(Task task) async {
     try {

@@ -1,4 +1,5 @@
 // lib/screens/TaskManager/widgets/weekly_calendar.dart
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../utilites/app_colors.dart';
@@ -20,6 +21,7 @@ class WeeklyCalendar extends StatelessWidget {
   Widget build(BuildContext context) {
     final weekDays = _getWeekDays(selectedDate);
     final today = DateTime.now();
+    final taskProvider = context.watch<TaskProvider>();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -45,7 +47,7 @@ class WeeklyCalendar extends StatelessWidget {
               final isToday = date.year == today.year &&
                   date.month == today.month &&
                   date.day == today.day;
-              final hasTasks = context.watch<TaskProvider>().hasTasksOnDate(date);
+              final hasTasks = taskProvider.hasTasksOnDate(date);
 
               return _buildDayCell(
                 date: date,
@@ -192,7 +194,7 @@ class WeeklyCalendar extends StatelessWidget {
   }
 
   String _dayName(int weekday) {
-    const days = ['Sun','Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     return days[weekday % 7];
   }
 

@@ -386,6 +386,7 @@ class Task {
   final DateTime? submissionTime;
   final String? description;
   final bool isDone;
+  final DateTime? completedAt; // ✅ ADDED: When task was completed
 
   // Additional fields for specific task types
   final String? examType;
@@ -436,6 +437,7 @@ class Task {
     this.experimentTitle,
     this.classType,
     this.isDone = false,
+    this.completedAt, // ✅ ADDED
     // Recurring fields with defaults
     this.recurringGroupId,
     this.recurrenceFrequency = RecurrenceFrequency.none,
@@ -532,12 +534,14 @@ class Task {
   Duration get reminderInterval => type.reminderInterval;
   bool get canManuallyComplete => type.hasManualCompletion;
   bool get autoCompletes => type.hasAutoCompletion;
+
   Color get statusColor {
     if (isDone) return Colors.green;
     if (isOverdue) return Colors.red;
     if (isDeadlineApproaching) return Colors.orange;
     return Colors.blue;
   }
+
   IconData get statusIcon {
     if (isDone) return Icons.check_circle;
     if (isOverdue) return Icons.warning;
@@ -698,6 +702,7 @@ class Task {
       'experimentTitle': experimentTitle,
       'classType': classType,
       'isDone': isDone,
+      'completedAt': completedAt != null ? Timestamp.fromDate(completedAt!) : null, // ✅ ADDED
       // Recurring fields
       'recurringGroupId': recurringGroupId,
       'recurrenceFrequency': recurrenceFrequency.name,
@@ -748,6 +753,7 @@ class Task {
       experimentTitle: map['experimentTitle']?.toString(),
       classType: map['classType']?.toString(),
       isDone: map['isDone'] ?? false,
+      completedAt: map['completedAt'] != null ? (map['completedAt'] as Timestamp).toDate() : null, // ✅ ADDED
       // Recurring fields
       recurringGroupId: map['recurringGroupId']?.toString(),
       recurrenceFrequency: RecurrenceFrequency.values.firstWhere(
@@ -794,6 +800,7 @@ class Task {
     String? experimentTitle,
     String? classType,
     bool? isDone,
+    DateTime? completedAt, // ✅ ADDED
     // Recurring fields
     String? recurringGroupId,
     RecurrenceFrequency? recurrenceFrequency,
@@ -832,6 +839,7 @@ class Task {
       experimentTitle: experimentTitle ?? this.experimentTitle,
       classType: classType ?? this.classType,
       isDone: isDone ?? this.isDone,
+      completedAt: completedAt ?? this.completedAt, // ✅ ADDED
       // Recurring fields
       recurringGroupId: recurringGroupId ?? this.recurringGroupId,
       recurrenceFrequency: recurrenceFrequency ?? this.recurrenceFrequency,
@@ -847,9 +855,11 @@ class Task {
   }
 
   Task toggleDone() {
+    final now = DateTime.now();
     return copyWith(
       isDone: !isDone,
-      updatedAt: DateTime.now(),
+      completedAt: !isDone ? now : null, // Set completedAt when marking as done
+      updatedAt: now,
     );
   }
 
@@ -892,7 +902,7 @@ class Task {
 
   String get formattedDeadlineWithStatus {
     if (effectiveDeadline == null) return 'No deadline';
-    if (isDone) return '✅ Completed on ${DateFormat('MMM d').format(updatedAt)}';
+    if (isDone) return '✅ Completed on ${DateFormat('MMM d').format(completedAt ?? updatedAt)}';
     if (isOverdue) return '⚠️ Overdue: ${DateFormat('MMM d, h:mm a').format(effectiveDeadline!)}';
     return '📅 Due: ${DateFormat('MMM d, h:mm a').format(effectiveDeadline!)}';
   }

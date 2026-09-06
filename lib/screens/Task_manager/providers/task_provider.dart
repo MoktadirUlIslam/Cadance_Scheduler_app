@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../models/taskmanager_model.dart';
 import '../services/TaskCompletionService.dart';
 import '../services/TaskManagerStatsService.dart';
+import '../services/task_firestore_service.dart';
 
 /// ULTRA-FAST TaskProvider - Optimized for sub-second operations
 class TaskProvider extends ChangeNotifier {

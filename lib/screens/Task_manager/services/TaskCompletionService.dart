@@ -11,43 +11,135 @@ import 'task_notification_helper.dart';
 class TaskCompletionService {
   final TaskFirestoreService _taskService = TaskFirestoreService();
   final TaskNotificationHelper _notificationHelper = TaskNotificationHelper();
+  Timer? _periodicTimer;
+  bool _isRunning = false;
+  bool _isInitialized = false;
 
-  TaskManagerStatsService get _statsService => TaskManagerStatsService();
+  // ✅ FIXED: Use lazy getter
+  TaskManagerStatsService? _statsService;
+  TaskManagerStatsService get statsService {
+    _statsService ??= TaskManagerStatsService();
+    return _statsService!;
+  }
 
-  // Check and auto-complete classes after end time - UPDATED to check all tasks
-  Future<void> checkAndCompleteClasses() async {
+  /// Initialize the service
+  Future<void> initialize() async {
+    if (_isInitialized) return;
+
     try {
-      final now = DateTime.now();
-      print('🔍 Running auto-completion check at: $now');
+      await _notificationHelper.initialize();
+      await statsService.initializeStats();
+      _isInitialized = true;
+      print('✅ TaskCompletionService initialized');
+    } catch (e) {
+      print('❌ Error initializing TaskCompletionService: $e');
+    }
+  }
 
-      // Get ALL tasks, not just today's
+  /// Start the auto-completion service with periodic checks
+  void startAutoCompletion({Duration interval = const Duration(minutes: 5)}) {
+    if (_periodicTimer != null) {
+      print('⚠️ Auto-completion service already running');
+      return;
+    }
+
+    print('🚀 Starting auto-completion service...');
+
+    // Initialize first
+    initialize().then((_) {
+      // Run immediately
+      runAllChecks();
+
+      // Then run periodically
+      _periodicTimer = Timer.periodic(interval, (timer) {
+        runAllChecks();
+      });
+
+      print('✅ Auto-completion service started (interval: ${interval.inMinutes} minutes)');
+    });
+  }
+
+  /// Stop the auto-completion service
+  void stopAutoCompletion() {
+    _periodicTimer?.cancel();
+    _periodicTimer = null;
+    print('⏹️ Auto-completion service stopped');
+  }
+
+  /// Check and auto-complete classes after end time
+  Future<void> checkAndCompleteClasses() async {
+    if (_isRunning) {
+      print('⚠️ Class completion check already in progress');
+      return;
+    }
+
+    try {
+      _isRunning = true;
+      final now = DateTime.now();
+      print('🔍 Running auto-completion check at: ${_formatDateTime(now)}');
+
+      // ✅ FIXED: Get ALL tasks with proper error handling
       final allTasks = await _taskService.getTasks().first;
+      print('📊 Total tasks retrieved: ${allTasks.length}');
+
+      if (allTasks.isEmpty) {
+        print('ℹ️ No tasks found');
+        _isRunning = false;
+        return;
+      }
 
       // Filter for classes that are not done yet
       final pendingClasses = allTasks.where((task) =>
-      task.type == TaskType.classes && !task.isDone
+      task.type == TaskType.classes &&
+          !task.isDone
       ).toList();
 
       print('📊 Found ${pendingClasses.length} pending classes');
 
+      if (pendingClasses.isEmpty) {
+        print('ℹ️ No pending classes to check');
+        _isRunning = false;
+        return;
+      }
+
       int completedCount = 0;
 
       for (var task in pendingClasses) {
+        print('\n━━━ Checking class: ${task.displayTitle} ━━━');
+
+        if (task.endTime == null) {
+          print('   ⚠️ No end time set');
+          continue;
+        }
+
+        final endTime = task.endTime!;
+        print('   📅 Date: ${_formatDate(endTime)}');
+        print('   ⏰ End time: ${_formatTime(endTime)}');
+        print('   ⏰ Current: ${_formatTime(now)}');
+
         // Check if end time has passed
-        if (task.endTime != null) {
-          final endTime = task.endTime!;
-          print('   Checking class: ${task.displayTitle}');
-          print('      End time: $endTime');
-          print('      Current time: $now');
-          print('      Is over? ${now.isAfter(endTime)}');
+        final isOver = now.isAfter(endTime);
+        print('   🔄 Is end time passed? $isOver');
 
-          if (now.isAfter(endTime)) {
-            // Auto-complete the class
-            final updatedTask = task.copyWith(
-              isDone: true,
-              updatedAt: now,
-            );
+        if (isOver) {
+          print('   ✅ Class should be auto-completed!');
 
+          // Check if it's within the same day
+          final isSameDay = _isSameDay(now, endTime);
+
+          if (isSameDay) {
+            print('   📅 Same day class - auto-completing');
+          } else {
+            print('   📅 Class from previous day - auto-completing');
+          }
+
+          final updatedTask = task.copyWith(
+            isDone: true,
+            completedAt: now,
+            updatedAt: now,
+          );
+
+          try {
             await _taskService.updateTask(updatedTask);
             completedCount++;
             print('✅ Auto-completed class: ${task.displayTitle}');
@@ -57,9 +149,12 @@ class TaskCompletionService {
               task: updatedTask,
               message: '🎓 Class "${task.displayTitle}" has been automatically marked as completed.',
             );
+          } catch (e) {
+            print('❌ Failed to update task: $e');
           }
         } else {
-          print('   ⚠️ Class ${task.displayTitle} has no end time set');
+          final timeLeft = endTime.difference(now);
+          print('   ⏱️ Time left: ${timeLeft.inMinutes} minutes');
         }
       }
 
@@ -70,17 +165,33 @@ class TaskCompletionService {
       }
     } catch (e) {
       print('❌ Error checking class completion: $e');
+      print('📋 Stack trace: ${StackTrace.current}');
+    } finally {
+      _isRunning = false;
     }
   }
 
-  // Check and extend deadlines for overdue tasks - UPDATED to check all tasks
+  /// Check and extend deadlines for overdue tasks
   Future<void> checkAndExtendDeadlines() async {
-    try {
-      final now = DateTime.now();
-      print('🔍 Running deadline check at: $now');
+    if (_isRunning) {
+      print('⚠️ Deadline check already in progress');
+      return;
+    }
 
-      // Get ALL tasks, not just today's
+    try {
+      _isRunning = true;
+      final now = DateTime.now();
+      print('🔍 Running deadline check at: ${_formatDateTime(now)}');
+
+      // ✅ FIXED: Get ALL tasks with proper error handling
       final allTasks = await _taskService.getTasks().first;
+      print('📊 Total tasks retrieved: ${allTasks.length}');
+
+      if (allTasks.isEmpty) {
+        print('ℹ️ No tasks found');
+        _isRunning = false;
+        return;
+      }
 
       // Filter for overdue tasks that are not done yet and have deadlines
       final overdueTasks = allTasks.where((task) =>
@@ -91,12 +202,18 @@ class TaskCompletionService {
 
       print('📊 Found ${overdueTasks.length} overdue tasks');
 
+      if (overdueTasks.isEmpty) {
+        print('ℹ️ No overdue tasks to process');
+        _isRunning = false;
+        return;
+      }
+
       int extendedCount = 0;
 
       for (var task in overdueTasks) {
-        print('   Checking overdue task: ${task.displayTitle}');
-        print('      Deadline: ${task.deadline}');
-        print('      Type: ${task.type.label}');
+        print('\n━━━ Checking overdue task: ${task.displayTitle} ━━━');
+        print('   📅 Deadline: ${_formatDateTime(task.deadline!)}');
+        print('   📋 Type: ${task.type.label}');
 
         // Only extend deadlines for Assignment, Lab Report, and Others
         if (task.type == TaskType.assignment ||
@@ -110,7 +227,7 @@ class TaskCompletionService {
             case TaskType.assignment:
             case TaskType.labReport:
               newDeadline = task.deadline!.add(const Duration(days: 1));
-              message = '⏰You have missed your ${task.type.label} deadline! Please submit your ${task.type.label} as soon as possible.';
+              message = '⏰ You have missed your ${task.type.label} deadline! Please submit your ${task.type.label} as soon as possible.';
               break;
 
             case TaskType.others:
@@ -128,19 +245,23 @@ class TaskCompletionService {
             updatedAt: now,
           );
 
-          await _taskService.updateTask(updatedTask);
-          extendedCount++;
-          print('✅ Extended deadline for ${task.type.label}: ${task.displayTitle}');
-          print('   New deadline: $newDeadline');
+          try {
+            await _taskService.updateTask(updatedTask);
+            extendedCount++;
+            print('✅ Extended deadline for ${task.type.label}: ${task.displayTitle}');
+            print('   📅 New deadline: ${_formatDateTime(newDeadline)}');
 
-          // Send notification about deadline extension
-          await _notificationHelper.sendDeadlineExtensionNotification(
-            task: updatedTask,
-            message: message,
-          );
+            // Send notification about deadline extension
+            await _notificationHelper.sendDeadlineExtensionNotification(
+              task: updatedTask,
+              message: message,
+            );
 
-          // Schedule new notifications for the extended deadline
-          await _notificationHelper.scheduleTaskNotifications(updatedTask);
+            // Schedule new notifications for the extended deadline
+            await _notificationHelper.scheduleTaskNotifications(updatedTask);
+          } catch (e) {
+            print('❌ Failed to extend deadline: $e');
+          }
         } else {
           print('   ⏭️ Skipping deadline extension for ${task.type.label} (not supported)');
         }
@@ -153,13 +274,17 @@ class TaskCompletionService {
       }
     } catch (e) {
       print('❌ Error checking deadline extensions: $e');
+      print('📋 Stack trace: ${StackTrace.current}');
+    } finally {
+      _isRunning = false;
     }
   }
 
-  // Toggle task completion status (manual toggle)
+  /// Toggle task completion status (manual toggle)
   Future<Task?> toggleTaskCompletion(Task task) async {
     try {
       final now = DateTime.now();
+      print('🔄 Toggling completion for: ${task.displayTitle}');
 
       // If marking as done, check if it's overdue
       if (!task.isDone) {
@@ -171,6 +296,7 @@ class TaskCompletionService {
             final updatedTask = task.copyWith(
               isDone: true,
               deadline: newDeadline,
+              completedAt: now,
               updatedAt: now,
             );
 
@@ -198,6 +324,7 @@ class TaskCompletionService {
             final updatedTask = task.copyWith(
               isDone: true,
               deadline: newDeadline,
+              completedAt: now,
               updatedAt: now,
             );
 
@@ -223,6 +350,7 @@ class TaskCompletionService {
           // Already overdue, just mark as done
           final updatedTask = task.copyWith(
             isDone: true,
+            completedAt: now,
             updatedAt: now,
           );
 
@@ -240,6 +368,7 @@ class TaskCompletionService {
         // Normal completion (not overdue)
         final updatedTask = task.copyWith(
           isDone: true,
+          completedAt: now,
           updatedAt: now,
         );
 
@@ -263,6 +392,7 @@ class TaskCompletionService {
         // Mark as pending (undo completion)
         final updatedTask = task.copyWith(
           isDone: false,
+          completedAt: null,
           updatedAt: now,
         );
 
@@ -279,11 +409,12 @@ class TaskCompletionService {
       }
     } catch (e) {
       print('❌ Error toggling task completion: $e');
+      print('📋 Stack trace: ${StackTrace.current}');
       return null;
     }
   }
 
-  // Run all checks (call this periodically)
+  /// Run all checks (call this periodically)
   Future<void> runAllChecks() async {
     try {
       print('🔄 Running all completion checks...');
@@ -292,10 +423,11 @@ class TaskCompletionService {
       print('✅ All completion checks completed');
     } catch (e) {
       print('❌ Error running all checks: $e');
+      print('📋 Stack trace: ${StackTrace.current}');
     }
   }
 
-  // Manual check for a specific task
+  /// Manual check for a specific task
   Future<Task?> checkAndCompleteSingleTask(Task task) async {
     try {
       final now = DateTime.now();
@@ -305,11 +437,18 @@ class TaskCompletionService {
         if (task.endTime != null && now.isAfter(task.endTime!)) {
           final updatedTask = task.copyWith(
             isDone: true,
+            completedAt: now,
             updatedAt: now,
           );
 
           final result = await _taskService.updateTask(updatedTask);
           print('✅ Manually completed class: ${task.displayTitle}');
+
+          await _notificationHelper.sendTaskCompletionNotification(
+            task: result,
+            message: '✅ Class "${task.displayTitle}" has been marked as completed!',
+          );
+
           return result;
         }
       }
@@ -320,12 +459,14 @@ class TaskCompletionService {
     }
   }
 
-  // Mark a task as done manually (without deadline extension logic)
+  /// Mark a task as done manually (without deadline extension logic)
   Future<Task?> markTaskAsDone(Task task) async {
     try {
+      final now = DateTime.now();
       final updatedTask = task.copyWith(
         isDone: true,
-        updatedAt: DateTime.now(),
+        completedAt: now,
+        updatedAt: now,
       );
 
       final result = await _taskService.updateTask(updatedTask);
@@ -343,11 +484,12 @@ class TaskCompletionService {
     }
   }
 
-  // Mark a task as pending (undo completion)
+  /// Mark a task as pending (undo completion)
   Future<Task?> markTaskAsPending(Task task) async {
     try {
       final updatedTask = task.copyWith(
         isDone: false,
+        completedAt: null,
         updatedAt: DateTime.now(),
       );
 
@@ -366,7 +508,7 @@ class TaskCompletionService {
     }
   }
 
-  // Auto-extend deadline for a specific task
+  /// Auto-extend deadline for a specific task
   Future<Task?> extendDeadline(Task task, {Duration? duration}) async {
     try {
       final extensionDuration = duration ?? task.extensionDuration;
@@ -392,7 +534,7 @@ class TaskCompletionService {
     }
   }
 
-  // Get all overdue tasks
+  /// Get all overdue tasks
   Future<List<Task>> getOverdueTasks() async {
     try {
       final allTasks = await _taskService.getTasks().first;
@@ -407,7 +549,7 @@ class TaskCompletionService {
     }
   }
 
-  // Get all pending tasks
+  /// Get all pending tasks
   Future<List<Task>> getPendingTasks() async {
     try {
       final allTasks = await _taskService.getTasks().first;
@@ -418,7 +560,7 @@ class TaskCompletionService {
     }
   }
 
-  // Get all completed tasks
+  /// Get all completed tasks
   Future<List<Task>> getCompletedTasks() async {
     try {
       final allTasks = await _taskService.getTasks().first;
@@ -429,7 +571,7 @@ class TaskCompletionService {
     }
   }
 
-  // Get completion statistics
+  /// Get completion statistics
   Future<Map<String, dynamic>> getCompletionStats() async {
     try {
       final allTasks = await _taskService.getTasks().first;
@@ -455,5 +597,22 @@ class TaskCompletionService {
         'completionRate': 0.0,
       };
     }
+  }
+
+  // Helper methods
+  String _formatDateTime(DateTime dateTime) {
+    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')} ${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDate(DateTime dateTime) {
+    return '${dateTime.year}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
+  }
+
+  String _formatTime(DateTime dateTime) {
+    return '${dateTime.hour.toString().padLeft(2, '0')}:${dateTime.minute.toString().padLeft(2, '0')}';
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 }
