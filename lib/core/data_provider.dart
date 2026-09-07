@@ -3,17 +3,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/profile_model.dart';
 import '../models/timer_stats_model.dart';
-import '../screens/Task_manager/services/TaskManagerStatsService.dart';
+import '../models/taskmanager_model.dart';
+import '../screens/Task_manager/services/task_notification_helper.dart';
 import '../services/ActivityTrackerService.dart';
+
+// ==================== DATA PROVIDER ====================
 
 class DataProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final TaskManagerStatsService _taskStatsService = TaskManagerStatsService();
   final ActivityTrackerService _activityService = ActivityTrackerService();
+  final TaskNotificationHelper _notificationHelper = TaskNotificationHelper();
 
   // ==================== USER DATA ====================
   String? _username;
@@ -41,10 +45,6 @@ class DataProvider extends ChangeNotifier {
   Map<String, Map<String, dynamic>> _dailyStats = {};
   bool _isLoadingDailyStats = false;
 
-  // ==================== TASK MANAGER STATS ====================
-  Map<String, dynamic> _taskManagerStats = {};
-  bool _isLoadingTaskStats = false;
-
   // ==================== PROFILE DATA ====================
   ProfileModel _profile = ProfileModel.empty();
   bool _isLoadingProfile = false;
@@ -54,6 +54,17 @@ class DataProvider extends ChangeNotifier {
   Map<String, dynamic> _activityStats = {};
   bool _isLoadingActivity = false;
   String? _activityError;
+
+  // ==================== TASK DATA ====================
+  List<Task> _tasks = [];
+  bool _isLoadingTasks = false;
+  String? _taskError;
+  FilterType _currentTaskFilter = FilterType.all;
+
+  // ==================== TASK STATS ====================
+  TaskStats? _taskStats;
+  bool _isLoadingTaskStats = false;
+  String? _taskStatsError;
 
   // ==================== GETTERS - USER DATA ====================
   String? get username => _username;
@@ -81,25 +92,11 @@ class DataProvider extends ChangeNotifier {
   Map<String, Map<String, dynamic>> get dailyStats => _dailyStats;
   bool get isLoadingDailyStats => _isLoadingDailyStats;
 
-  // ==================== GETTERS - TASK MANAGER STATS ====================
-  Map<String, dynamic> get taskManagerStats => _taskManagerStats;
-  bool get isLoadingTaskStats => _isLoadingTaskStats;
-
-  // Task Manager Stats - Individual Getters
-  int get totalTasksDone => _taskManagerStats['totalTasksDone'] ?? 0;
-  int get totalClassesDone => _taskManagerStats['totalClassesDone'] ?? 0;
-  int get totalAssignmentsDone => _taskManagerStats['totalAssignmentsDone'] ?? 0;
-  int get totalLabReportsDone => _taskManagerStats['totalLabReportsDone'] ?? 0;
-  int get totalExamsDone => _taskManagerStats['totalExamsDone'] ?? 0;
-  int get totalOthersDone => _taskManagerStats['totalOthersDone'] ?? 0;
-  DateTime? get taskStatsLastUpdated => _taskManagerStats['lastUpdated'];
-
   // ==================== GETTERS - PROFILE ====================
   ProfileModel get profile => _profile;
   bool get isLoadingProfile => _isLoadingProfile;
   String? get profileError => _profileError;
 
-  // Profile getters for convenience
   String get userMobile => _profile.mobile ?? 'Not set';
   int? get userAge => _profile.age;
   String get userGender => _profile.gender ?? 'Not set';
@@ -115,26 +112,44 @@ class DataProvider extends ChangeNotifier {
   int get maxStreak => _activityStats['maxStreak'] ?? 0;
   List<String> get activeDays => List<String>.from(_activityStats['activeDays'] ?? []);
 
+  // ==================== GETTERS - TASKS ====================
+  List<Task> get tasks => _tasks;
+  bool get isLoadingTasks => _isLoadingTasks;
+  String? get taskError => _taskError;
+  FilterType get currentTaskFilter => _currentTaskFilter;
+
+  List<Task> get filteredTasks {
+    return _applyTaskFilter(_tasks, _currentTaskFilter);
+  }
+
+  // ==================== GETTERS - TASK STATS ====================
+  TaskStats? get taskStats => _taskStats;
+  bool get isLoadingTaskStats => _isLoadingTaskStats;
+  String? get taskStatsError => _taskStatsError;
+
+  int get totalTasksDone => _taskStats?.totalCompleted ?? 0;
+  int get totalClassesDone => _taskStats?.totalClasses ?? 0;
+  int get totalAssignmentsDone => _taskStats?.totalAssignments ?? 0;
+  int get totalLabReportsDone => _taskStats?.totalLabReports ?? 0;
+  int get totalExamsDone => _taskStats?.totalExams ?? 0;
+  int get totalOthersDone => _taskStats?.totalOthers ?? 0;
+  int get totalPendingTasks => _taskStats?.totalPending ?? 0;
+  int get totalOverdueTasks => _taskStats?.totalOverdue ?? 0;
+  int get completedTodayCount => _taskStats?.completedToday ?? 0;
+  int get currentStreakDays => _taskStats?.currentStreak ?? 0;
+  int get longestStreakDays => _taskStats?.longestStreak ?? 0;
+
   // ==================== HELPER METHODS ====================
 
   String getGreeting() {
     final hour = DateTime.now().hour;
-
-    if (hour >= 5 && hour < 8) {
-      return 'Good Dawn 🌅';
-    } else if (hour >= 8 && hour < 12) {
-      return 'Good Morning ☀️';
-    } else if (hour >= 12 && hour < 13) {
-      return 'Good Noon 🌞';
-    } else if (hour >= 13 && hour < 17) {
-      return 'Good Afternoon 🌤️';
-    } else if (hour >= 17 && hour < 20) {
-      return 'Good Evening 🌇';
-    } else if (hour >= 20 && hour < 23) {
-      return 'Good Night 🌙';
-    } else {
-      return 'Good Late Night 🌃';
-    }
+    if (hour >= 5 && hour < 8) return 'Good Dawn 🌅';
+    if (hour >= 8 && hour < 12) return 'Good Morning ☀️';
+    if (hour >= 12 && hour < 13) return 'Good Noon 🌞';
+    if (hour >= 13 && hour < 17) return 'Good Afternoon 🌤️';
+    if (hour >= 17 && hour < 20) return 'Good Evening 🌇';
+    if (hour >= 20 && hour < 23) return 'Good Night 🌙';
+    return 'Good Late Night 🌃';
   }
 
   int get todayFocusMinutes {
@@ -167,6 +182,130 @@ class DataProvider extends ChangeNotifier {
         .fold(0, (sum, stat) => sum + stat.totalTaskCount);
   }
 
+  // ==================== TASK HELPER METHODS ====================
+
+  List<Task> getTasksForDate(DateTime date) {
+    return _tasks.where((task) {
+      final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
+      final compareDate = DateTime(date.year, date.month, date.day);
+      return taskDate.isAtSameMomentAs(compareDate);
+    }).toList();
+  }
+
+  List<Task> getTasksForWeek(DateTime startOfWeek) {
+    final endOfWeek = startOfWeek.add(const Duration(days: 7));
+    return _tasks.where((task) {
+      final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
+      return taskDate.isAfter(startOfWeek.subtract(const Duration(days: 1))) &&
+          taskDate.isBefore(endOfWeek);
+    }).toList();
+  }
+
+  List<Task> getTasksForMonth(int year, int month) {
+    return _tasks.where((task) {
+      return task.date.year == year && task.date.month == month;
+    }).toList();
+  }
+
+  List<Task> getUpcomingTasks() {
+    final now = DateTime.now();
+    return _tasks.where((task) {
+      if (task.isDone) return false;
+      final taskDate = DateTime(task.date.year, task.date.month, task.date.day);
+      return taskDate.isAfter(now.subtract(const Duration(days: 1)));
+    }).toList();
+  }
+
+  List<Task> getOverdueTasks() {
+    return _tasks.where((task) => task.isOverdue && !task.isDone).toList();
+  }
+
+  List<Task> getCompletedTasks() {
+    return _tasks.where((task) => task.isDone).toList();
+  }
+
+  List<Task> getTasksByType(TaskType type) {
+    return _tasks.where((task) => task.type == type).toList();
+  }
+
+  List<Task> getTasksByPriority(Priority priority) {
+    return _tasks.where((task) => task.priority == priority).toList();
+  }
+
+  List<Task> searchTasks(String query) {
+    if (query.isEmpty) return _tasks;
+    final lowercaseQuery = query.toLowerCase();
+    return _tasks.where((task) {
+      return task.displayTitle.toLowerCase().contains(lowercaseQuery) ||
+          (task.courseCode?.toLowerCase().contains(lowercaseQuery) ?? false) ||
+          (task.courseTitle?.toLowerCase().contains(lowercaseQuery) ?? false) ||
+          (task.teacherName?.toLowerCase().contains(lowercaseQuery) ?? false) ||
+          (task.location?.toLowerCase().contains(lowercaseQuery) ?? false);
+    }).toList();
+  }
+
+  Task? getTaskById(String id) {
+    try {
+      return _tasks.firstWhere((t) => t.id == id);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Map<String, int> getTaskCountByStatus() {
+    final completed = _tasks.where((t) => t.isDone).length;
+    final pending = _tasks.where((t) => !t.isDone).length;
+    final overdue = _tasks.where((t) => t.isOverdue && !t.isDone).length;
+    return {
+      'completed': completed,
+      'pending': pending,
+      'overdue': overdue,
+      'total': _tasks.length,
+    };
+  }
+
+  Map<DateTime, List<Task>> getTasksGroupedByDate() {
+    final Map<DateTime, List<Task>> grouped = {};
+    for (final task in _tasks) {
+      final date = DateTime(task.date.year, task.date.month, task.date.day);
+      if (!grouped.containsKey(date)) {
+        grouped[date] = [];
+      }
+      grouped[date]!.add(task);
+    }
+    return grouped;
+  }
+
+  bool hasTasksOnDate(DateTime date) {
+    return getTasksForDate(date).isNotEmpty;
+  }
+
+  /// ✅ Get all tasks in a recurring group
+  List<Task> getTasksByRecurringGroup(String recurringGroupId) {
+    return _tasks.where((t) => t.recurringGroupId == recurringGroupId).toList();
+  }
+
+  /// ✅ Get the parent task of a recurring group
+  Task? getRecurringParent(String recurringGroupId) {
+    try {
+      return _tasks.firstWhere((t) =>
+      t.recurringGroupId == recurringGroupId && t.isRecurringParent
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// ✅ Get all recurring class instances for a date
+  List<Task> getRecurringInstancesForDate(DateTime date, String recurringGroupId) {
+    return _tasks.where((t) =>
+    t.recurringGroupId == recurringGroupId &&
+        t.date.year == date.year &&
+        t.date.month == date.month &&
+        t.date.day == date.day
+    ).toList();
+  }
+
   // ==================== CONSTRUCTOR ====================
 
   DataProvider() {
@@ -184,9 +323,10 @@ class DataProvider extends ChangeNotifier {
       _loadTimerStats(),
       _loadSessionHistory(),
       _loadDailyStats(),
-      _loadTaskManagerStats(),
       _loadProfile(),
       _loadActivityStats(),
+      _loadTasks(),
+      _loadTaskStats(),
     ]);
   }
 
@@ -199,7 +339,7 @@ class DataProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    final totalTasks = 7;
+    final totalTasks = 8;
     int loaded = 0;
 
     try {
@@ -219,10 +359,6 @@ class DataProvider extends ChangeNotifier {
       loaded++;
       if (onProgress != null) onProgress(totalTasks, loaded);
 
-      await _loadTaskManagerStats();
-      loaded++;
-      if (onProgress != null) onProgress(totalTasks, loaded);
-
       await _loadProfile();
       loaded++;
       if (onProgress != null) onProgress(totalTasks, loaded);
@@ -230,6 +366,15 @@ class DataProvider extends ChangeNotifier {
       await _loadActivityStats();
       loaded++;
       if (onProgress != null) onProgress(totalTasks, loaded);
+
+      await _loadTasks();
+      loaded++;
+      if (onProgress != null) onProgress(totalTasks, loaded);
+
+      await _loadTaskStats();
+      loaded++;
+      if (onProgress != null) onProgress(totalTasks, loaded);
+
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -449,39 +594,6 @@ class DataProvider extends ChangeNotifier {
       _dailyStats = {};
     } finally {
       _isLoadingDailyStats = false;
-      notifyListeners();
-    }
-  }
-
-  // ==================== TASK MANAGER STATS ====================
-
-  Future<void> _loadTaskManagerStats() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-
-    _isLoadingTaskStats = true;
-    notifyListeners();
-
-    try {
-      _taskManagerStats = await _taskStatsService.getStats();
-
-      _taskManagerStats['totalTasksDone'] = _taskManagerStats['totalTasksDone'] ?? 0;
-      _taskManagerStats['totalClassesDone'] = _taskManagerStats['totalClassesDone'] ?? 0;
-      _taskManagerStats['totalAssignmentsDone'] = _taskManagerStats['totalAssignmentsDone'] ?? 0;
-      _taskManagerStats['totalLabReportsDone'] = _taskManagerStats['totalLabReportsDone'] ?? 0;
-      _taskManagerStats['totalExamsDone'] = _taskManagerStats['totalExamsDone'] ?? 0;
-      _taskManagerStats['totalOthersDone'] = _taskManagerStats['totalOthersDone'] ?? 0;
-    } catch (_) {
-      _taskManagerStats = {
-        'totalTasksDone': 0,
-        'totalClassesDone': 0,
-        'totalAssignmentsDone': 0,
-        'totalLabReportsDone': 0,
-        'totalExamsDone': 0,
-        'totalOthersDone': 0,
-      };
-    } finally {
-      _isLoadingTaskStats = false;
       notifyListeners();
     }
   }
@@ -731,88 +843,360 @@ class DataProvider extends ChangeNotifier {
     }
   }
 
-  // ==================== TASK MANAGER STATS - PUBLIC METHODS ====================
+  // ==================== TASK STATS METHODS ====================
 
-  Future<void> refreshTaskManagerStats() async {
-    await _loadTaskManagerStats();
+  DocumentReference<Map<String, dynamic>> _getTaskStatsRef() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+    return _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('stats')
+        .doc('taskStats');
   }
 
-  Map<String, dynamic> getTaskManagerStatsSummary() {
-    return {
-      'totalTasksDone': totalTasksDone,
-      'totalClassesDone': totalClassesDone,
-      'totalAssignmentsDone': totalAssignmentsDone,
-      'totalLabReportsDone': totalLabReportsDone,
-      'totalExamsDone': totalExamsDone,
-      'totalOthersDone': totalOthersDone,
-      'lastUpdated': taskStatsLastUpdated,
-    };
-  }
+  Future<void> _loadTaskStats() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      _taskStats = null;
+      notifyListeners();
+      return;
+    }
 
-  Map<String, Map<String, dynamic>> getTaskManagerStatsByType() {
-    return {
-      'Classes': {
-        'total': totalClassesDone,
-        'icon': '🏫',
-        'color': '#4CAF50',
-      },
-      'Assignments': {
-        'total': totalAssignmentsDone,
-        'icon': '📝',
-        'color': '#9C27B0',
-      },
-      'Lab Reports': {
-        'total': totalLabReportsDone,
-        'icon': '🔬',
-        'color': '#2196F3',
-      },
-      'Exams': {
-        'total': totalExamsDone,
-        'icon': '📚',
-        'color': '#FF9800',
-      },
-      'Others': {
-        'total': totalOthersDone,
-        'icon': '📌',
-        'color': '#757575',
-      },
-    };
-  }
+    _isLoadingTaskStats = true;
+    _taskStatsError = null;
+    notifyListeners();
 
-  double getTaskManagerCompletionRate() {
-    final total = totalTasksDone;
-    if (total == 0) return 0.0;
-
-    final completed = totalClassesDone + totalAssignmentsDone +
-        totalLabReportsDone + totalExamsDone + totalOthersDone;
-
-    if (completed == 0) return 0.0;
-    return (completed / total) * 100;
-  }
-
-  Future<bool> taskManagerStatsExist() async {
     try {
-      return await _taskStatsService.statsExist();
-    } catch (_) {
-      return false;
+      final doc = await _getTaskStatsRef().get();
+
+      if (doc.exists && doc.data() != null) {
+        _taskStats = TaskStats.fromMap(doc.data()!);
+      } else {
+        _taskStats = TaskStats(lastUpdated: DateTime.now());
+        await _saveTaskStats(_taskStats!);
+      }
+    } catch (e) {
+      _taskStatsError = e.toString();
+      _taskStats = TaskStats(lastUpdated: DateTime.now());
+    } finally {
+      _isLoadingTaskStats = false;
+      notifyListeners();
     }
   }
 
-  Future<void> initializeTaskManagerStats() async {
+  TaskStats _calculateTaskStats() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+
+    int totalClasses = 0;
+    int totalAssignments = 0;
+    int totalLabReports = 0;
+    int totalExams = 0;
+    int totalOthers = 0;
+    int totalCompleted = 0;
+    int totalPending = 0;
+    int totalOverdue = 0;
+    int completedToday = 0;
+
+    for (final task in _tasks) {
+      switch (task.type) {
+        case TaskType.classes:
+          totalClasses++;
+          break;
+        case TaskType.assignment:
+          totalAssignments++;
+          break;
+        case TaskType.labReport:
+          totalLabReports++;
+          break;
+        case TaskType.exam:
+          totalExams++;
+          break;
+        case TaskType.others:
+          totalOthers++;
+          break;
+      }
+
+      if (task.isDone) {
+        totalCompleted++;
+        if (task.completedAt != null) {
+          final completedDate = DateTime(
+            task.completedAt!.year,
+            task.completedAt!.month,
+            task.completedAt!.day,
+          );
+          if (completedDate.isAtSameMomentAs(today)) {
+            completedToday++;
+          }
+        }
+      } else {
+        totalPending++;
+        if (task.isOverdue) {
+          totalOverdue++;
+        }
+      }
+    }
+
+    return TaskStats(
+      totalTasks: _tasks.length,
+      totalClasses: totalClasses,
+      totalAssignments: totalAssignments,
+      totalLabReports: totalLabReports,
+      totalExams: totalExams,
+      totalOthers: totalOthers,
+      totalCompleted: totalCompleted,
+      totalPending: totalPending,
+      totalOverdue: totalOverdue,
+      completedToday: completedToday,
+      currentStreak: _taskStats?.currentStreak ?? 0,
+      longestStreak: _taskStats?.longestStreak ?? 0,
+      lastUpdated: now,
+    );
+  }
+
+  Future<void> _saveTaskStats(TaskStats stats) async {
     try {
-      await _taskStatsService.initializeStats();
-      await _loadTaskManagerStats();
-    } catch (_) {
-      // Silent fail
+      await _getTaskStatsRef().set(stats.toMap(), SetOptions(merge: true));
+      _taskStats = stats;
+      notifyListeners();
+    } catch (e) {
+      _taskStatsError = e.toString();
+      debugPrint('❌ DataProvider: Error saving task stats: $e');
+      rethrow;
     }
   }
 
-  Future<void> resetTaskManagerStats() async {
+  Future<void> updateTaskStats() async {
     try {
-      await _taskStatsService.resetStats();
-      await _loadTaskManagerStats();
-    } catch (_) {
-      // Silent fail
+      _isLoadingTaskStats = true;
+      notifyListeners();
+
+      final newStats = _calculateTaskStats();
+      await _saveTaskStats(newStats);
+
+      _isLoadingTaskStats = false;
+      notifyListeners();
+
+      debugPrint('✅ DataProvider: Task stats updated: ${newStats.totalCompleted} completed');
+    } catch (e) {
+      _isLoadingTaskStats = false;
+      _taskStatsError = e.toString();
+      notifyListeners();
+      debugPrint('❌ DataProvider: Error updating task stats: $e');
+      rethrow;
+    }
+  }
+
+  Stream<TaskStats> watchTaskStats() {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return Stream.error('User not authenticated');
+      }
+
+      return _getTaskStatsRef().snapshots().map((snapshot) {
+        if (snapshot.exists && snapshot.data() != null) {
+          _taskStats = TaskStats.fromMap(snapshot.data()!);
+        } else {
+          _taskStats = TaskStats(lastUpdated: DateTime.now());
+        }
+        notifyListeners();
+        return _taskStats!;
+      }).handleError((error) {
+        _taskStatsError = error.toString();
+        notifyListeners();
+        debugPrint('❌ DataProvider: Task stats stream error: $error');
+        return TaskStats(lastUpdated: DateTime.now());
+      });
+    } catch (e) {
+      return Stream.error(e.toString());
+    }
+  }
+
+  // ==================== TASK DATA FETCHING METHODS ====================
+
+  CollectionReference<Map<String, dynamic>> _getTasksCollection() {
+    final user = _auth.currentUser;
+    if (user == null) {
+      throw Exception('User not authenticated');
+    }
+    return _firestore
+        .collection('users')
+        .doc(user.uid)
+        .collection('tasks');
+  }
+
+  Future<void> _initNotificationHelper() async {
+    try {
+      await _notificationHelper.initialize();
+    } catch (e) {
+      debugPrint('❌ Error initializing notification helper: $e');
+    }
+  }
+
+  Future<void> _scheduleAllTaskNotifications() async {
+    try {
+      if (_tasks.isEmpty) return;
+      await _initNotificationHelper();
+      await _notificationHelper.scheduleAllTaskNotifications(_tasks);
+      debugPrint('📬 Scheduled notifications for ${_tasks.length} tasks');
+    } catch (e) {
+      debugPrint('❌ Error scheduling all task notifications: $e');
+    }
+  }
+
+  /// ✅ Load all tasks for current user
+  Future<void> _loadTasks() async {
+    final user = _auth.currentUser;
+    if (user == null) {
+      _tasks = [];
+      notifyListeners();
+      return;
+    }
+
+    _isLoadingTasks = true;
+    _taskError = null;
+    notifyListeners();
+
+    try {
+      final querySnapshot = await _getTasksCollection()
+          .orderBy('date', descending: true)
+          .get();
+
+      _tasks = querySnapshot.docs.map((doc) {
+        return Task.fromMap(doc.id, doc.data());
+      }).toList();
+
+      _isLoadingTasks = false;
+      notifyListeners();
+      debugPrint('✅ DataProvider: Loaded ${_tasks.length} tasks from Firestore');
+
+      _scheduleAllTaskNotifications();
+      await updateTaskStats();
+
+    } catch (e) {
+      _isLoadingTasks = false;
+      _taskError = 'Failed to load tasks: ${e.toString()}';
+      notifyListeners();
+      debugPrint('❌ DataProvider: Error loading tasks: $e');
+    }
+  }
+
+  /// ✅ Watch tasks with real-time updates (Stream)
+  Stream<List<Task>> watchTasks() {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return Stream.error('User not authenticated');
+      }
+
+      return _getTasksCollection()
+          .orderBy('date', descending: true)
+          .snapshots()
+          .map((snapshot) {
+        _tasks = snapshot.docs.map((doc) {
+          return Task.fromMap(doc.id, doc.data());
+        }).toList();
+        _isLoadingTasks = false;
+        notifyListeners();
+        debugPrint('🔄 DataProvider: Real-time update - ${_tasks.length} tasks');
+
+        updateTaskStats();
+
+        return _tasks;
+      }).handleError((error) {
+        _taskError = error.toString();
+        notifyListeners();
+        debugPrint('❌ DataProvider: Stream error: $error');
+      });
+    } catch (e) {
+      return Stream.error(e.toString());
+    }
+  }
+
+  /// ✅ Watch tasks with filter applied
+  Stream<List<Task>> watchTasksWithFilter(FilterType filter) {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        return Stream.error('User not authenticated');
+      }
+
+      return _getTasksCollection()
+          .orderBy('date', descending: true)
+          .snapshots()
+          .map((snapshot) {
+        final allTasks = snapshot.docs.map((doc) {
+          return Task.fromMap(doc.id, doc.data());
+        }).toList();
+
+        _tasks = allTasks;
+        _currentTaskFilter = filter;
+        notifyListeners();
+
+        updateTaskStats();
+
+        return _applyTaskFilter(allTasks, filter);
+      }).handleError((error) {
+        _taskError = error.toString();
+        notifyListeners();
+        debugPrint('❌ DataProvider: Stream with filter error: $error');
+      });
+    } catch (e) {
+      return Stream.error(e.toString());
+    }
+  }
+
+  List<Task> _applyTaskFilter(List<Task> tasks, FilterType filter) {
+    switch (filter) {
+      case FilterType.all:
+        return tasks;
+      case FilterType.exam:
+        return tasks.where((t) => t.type == TaskType.exam).toList();
+      case FilterType.assignment:
+        return tasks.where((t) => t.type == TaskType.assignment).toList();
+      case FilterType.labReport:
+        return tasks.where((t) => t.type == TaskType.labReport).toList();
+      case FilterType.classes:
+        return tasks.where((t) => t.type == TaskType.classes).toList();
+      case FilterType.highPriority:
+        return tasks.where((t) => t.priority == Priority.high).toList();
+      case FilterType.mediumPriority:
+        return tasks.where((t) => t.priority == Priority.medium).toList();
+      case FilterType.lowPriority:
+        return tasks.where((t) => t.priority == Priority.low).toList();
+    }
+  }
+
+  Future<void> refreshTasks() async {
+    await _loadTasks();
+  }
+
+  Future<void> refreshTaskStats() async {
+    await _loadTaskStats();
+    await updateTaskStats();
+  }
+
+  void setTaskFilter(FilterType filter) {
+    _currentTaskFilter = filter;
+    notifyListeners();
+  }
+
+  void clearTaskError() {
+    _taskError = null;
+    notifyListeners();
+  }
+
+  Future<void> clearAllNotifications() async {
+    try {
+      await _initNotificationHelper();
+      await _notificationHelper.clearAllNotifications();
+      debugPrint('✅ Cleared all notifications');
+    } catch (e) {
+      debugPrint('❌ Error clearing notifications: $e');
     }
   }
 
@@ -840,17 +1224,6 @@ class DataProvider extends ChangeNotifier {
         .doc(user.uid)
         .collection('stats')
         .doc('timerStats')
-        .snapshots();
-  }
-
-  Stream<DocumentSnapshot> getTaskManagerStatsStream() {
-    final user = _auth.currentUser;
-    if (user == null) return Stream.empty();
-    return _firestore
-        .collection('users')
-        .doc(user.uid)
-        .collection('stats')
-        .doc('taskManagerStats')
         .snapshots();
   }
 
@@ -885,6 +1258,20 @@ class DataProvider extends ChangeNotifier {
         .collection('activity')
         .doc('tracking')
         .snapshots();
+  }
+
+  Stream<QuerySnapshot> getTasksStream() {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.empty();
+    return _getTasksCollection()
+        .orderBy('date', descending: true)
+        .snapshots();
+  }
+
+  Stream<DocumentSnapshot> getTaskStatsStream() {
+    final user = _auth.currentUser;
+    if (user == null) return Stream.empty();
+    return _getTaskStatsRef().snapshots();
   }
 
   // ==================== REFRESH METHODS ====================
@@ -932,18 +1319,32 @@ class DataProvider extends ChangeNotifier {
     _lastActivityDate = null;
     _sessionHistory.clear();
     _dailyStats.clear();
-    _taskManagerStats = {};
     _profile = ProfileModel.empty();
     _activityStats = {};
+    _tasks.clear();
+    _taskStats = null;
     _isLoading = false;
     _isLoadingSessions = false;
     _isLoadingDailyStats = false;
-    _isLoadingTaskStats = false;
     _isLoadingProfile = false;
     _isLoadingActivity = false;
+    _isLoadingTasks = false;
+    _isLoadingTaskStats = false;
     _error = null;
     _profileError = null;
     _activityError = null;
+    _taskError = null;
+    _taskStatsError = null;
+    _currentTaskFilter = FilterType.all;
+
+    _notificationHelper.clearAllNotifications();
+
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _notificationHelper.clearAllNotifications();
+    super.dispose();
   }
 }

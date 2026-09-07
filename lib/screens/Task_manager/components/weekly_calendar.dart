@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../../core/data_provider.dart';
 import '../../../utilites/app_colors.dart';
-import '../providers/task_provider.dart';
 
 class WeeklyCalendar extends StatelessWidget {
   final DateTime selectedDate;
@@ -21,7 +21,7 @@ class WeeklyCalendar extends StatelessWidget {
   Widget build(BuildContext context) {
     final weekDays = _getWeekDays(selectedDate);
     final today = DateTime.now();
-    final taskProvider = context.watch<TaskProvider>();
+    final dataProvider = context.watch<DataProvider>();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -47,13 +47,19 @@ class WeeklyCalendar extends StatelessWidget {
               final isToday = date.year == today.year &&
                   date.month == today.month &&
                   date.day == today.day;
-              final hasTasks = taskProvider.hasTasksOnDate(date);
+
+              // ✅ Use DataProvider to check if date has tasks
+              final hasTasks = dataProvider.hasTasksOnDate(date);
+
+              // Get task count for the date
+              final taskCount = dataProvider.getTasksForDate(date).length;
 
               return _buildDayCell(
                 date: date,
                 isSelected: isSelected,
                 isToday: isToday,
                 hasTasks: hasTasks,
+                taskCount: taskCount,
                 onTap: () => onDateSelected(date),
               );
             }).toList(),
@@ -113,6 +119,7 @@ class WeeklyCalendar extends StatelessWidget {
     required bool isSelected,
     required bool isToday,
     required bool hasTasks,
+    required int taskCount,
     required VoidCallback onTap,
   }) {
     final dayName = _dayName(date.weekday);
@@ -159,19 +166,66 @@ class WeeklyCalendar extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          // Task indicator dots
+          // Task indicator dots - show multiple dots for multiple tasks
           if (hasTasks)
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Container(
-                  width: 4,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: isSelected ? Colors.white : AppColors.primaryLight,
+                // Show up to 3 dots, or a number for more than 3
+                if (taskCount <= 3)
+                  ...List.generate(
+                    taskCount,
+                        (index) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1.5),
+                      child: Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? Colors.white : AppColors.primaryLight,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? Colors.white : AppColors.primaryLight,
+                        ),
+                      ),
+                      Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? Colors.white : AppColors.primaryLight,
+                        ),
+                      ),
+                      Container(
+                        width: 4,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: isSelected ? Colors.white : AppColors.primaryLight,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        '+${taskCount - 3}',
+                        style: TextStyle(
+                          fontSize: 8,
+                          fontWeight: FontWeight.w600,
+                          color: isSelected ? Colors.white : AppColors.primaryLight,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
               ],
             )
           else

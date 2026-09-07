@@ -35,9 +35,10 @@ class _TaskFormState extends State<TaskForm> {
   late DateTime? _deadline;
   late TimeOfDay? _submissionTime;
 
-  // Recurring fields
+  // ✅ Recurring fields
   late RecurrenceFrequency _recurrenceFrequency;
-  late DateTime? _expectedEndDate;
+  late DateTime? _recurringStartDate;
+  late DateTime? _recurringEndDate;
   late bool _isRecurring;
 
   // Exam subtype
@@ -81,8 +82,11 @@ class _TaskFormState extends State<TaskForm> {
       _submissionTime = task.submissionTime != null
           ? TimeOfDay.fromDateTime(task.submissionTime!)
           : null;
+
+      // ✅ Recurring fields
       _recurrenceFrequency = task.recurrenceFrequency;
-      _expectedEndDate = task.expectedEndDate;
+      _recurringStartDate = task.recurringStartDate;
+      _recurringEndDate = task.recurringEndDate;
       _isRecurring = task.isRecurring;
 
       if (task.type == TaskType.exam) {
@@ -109,8 +113,10 @@ class _TaskFormState extends State<TaskForm> {
       _deadline = DateTime.now().add(const Duration(days: 7));
       _submissionTime = TimeOfDay(hour: 23, minute: 59);
 
-      _recurrenceFrequency = RecurrenceFrequency.none;
-      _expectedEndDate = null;
+      // ✅ Recurring fields defaults
+      _recurrenceFrequency = RecurrenceFrequency.weekly;
+      _recurringStartDate = _date;
+      _recurringEndDate = _date.add(const Duration(days: 120));
       _isRecurring = false;
       _examSubtype = ExamSubtype.classTest;
       _classSubtype = ClassSubtype.regular;
@@ -265,23 +271,14 @@ class _TaskFormState extends State<TaskForm> {
         ),
       );
 
-      if (_classSubtype == ClassSubtype.sessional) {
-        fields.add(
-          FormFieldConfig(
-            key: 'date',
-            type: FormFieldType.custom,
-            customWidget: _buildDatePickerWithRecurring(),
-          ),
-        );
-      } else {
-        fields.add(
-          FormFieldConfig(
-            key: 'date',
-            type: FormFieldType.custom,
-            customWidget: _buildDatePicker(),
-          ),
-        );
-      }
+      // ✅ Always show recurring options for both Regular and Sessional classes
+      fields.add(
+        FormFieldConfig(
+          key: 'date',
+          type: FormFieldType.custom,
+          customWidget: _buildDatePickerWithRecurring(),
+        ),
+      );
 
       fields.add(
         FormFieldConfig(
@@ -475,7 +472,7 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
-    // ========== LAB REPORT (UPDATED - Only Deadline, no fixed date) ==========
+    // ========== LAB REPORT ==========
     if (_taskType == TaskType.labReport) {
       fields.add(
         FormFieldConfig(
@@ -497,7 +494,6 @@ class _TaskFormState extends State<TaskForm> {
           keyboardType: TextInputType.text,
         ),
       );
-      // Only show deadline picker (no fixed date display)
       fields.add(
         FormFieldConfig(
           key: 'deadline',
@@ -527,10 +523,8 @@ class _TaskFormState extends State<TaskForm> {
       );
     }
 
-    // ========== OTHERS (UPDATED - Only Deadline, no fixed date) ==========
+    // ========== OTHERS ==========
     if (_taskType == TaskType.others) {
-      // Title is already added above
-      // Only show deadline picker (no fixed date display)
       fields.add(
         FormFieldConfig(
           key: 'deadline',
@@ -541,7 +535,6 @@ class _TaskFormState extends State<TaskForm> {
     }
 
     // ========== COMMON FIELDS ==========
-    // Priority
     fields.add(
       FormFieldConfig(
         key: 'priority',
@@ -550,7 +543,6 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
-    // Reminders
     fields.add(
       FormFieldConfig(
         key: 'reminders',
@@ -559,7 +551,6 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
-    // Alarm
     fields.add(
       FormFieldConfig(
         key: 'alarm',
@@ -568,7 +559,6 @@ class _TaskFormState extends State<TaskForm> {
       ),
     );
 
-    // Description
     fields.add(
       FormFieldConfig(
         key: 'description',
@@ -603,10 +593,9 @@ class _TaskFormState extends State<TaskForm> {
                 onTap: () {
                   setState(() {
                     _classSubtype = subtype;
-                    if (subtype == ClassSubtype.regular) {
-                      _isRecurring = false;
-                      _recurrenceFrequency = RecurrenceFrequency.none;
-                      _expectedEndDate = null;
+                    // ✅ When switching to Regular, keep recurring if already enabled
+                    if (subtype == ClassSubtype.regular && !_isRecurring) {
+                      // Don't auto-enable recurring for regular
                     }
                   });
                 },
@@ -880,7 +869,7 @@ class _TaskFormState extends State<TaskForm> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildLabel('First Class Date', isDarkMode),
+        _buildLabel('Class Date', isDarkMode),
         const SizedBox(height: 8),
         _buildDatePicker(),
         const SizedBox(height: 16),
@@ -889,7 +878,7 @@ class _TaskFormState extends State<TaskForm> {
           const SizedBox(height: 12),
           _buildRecurrenceFrequencySelector(),
           const SizedBox(height: 12),
-          _buildExpectedEndDatePicker(),
+          _buildRecurringEndDatePicker(),
         ],
       ],
     );
@@ -930,8 +919,8 @@ class _TaskFormState extends State<TaskForm> {
         if (picked != null) {
           setState(() {
             _date = picked;
-            if (_isRecurring && _expectedEndDate == null) {
-              _expectedEndDate = _date.add(const Duration(days: 120));
+            if (_isRecurring && _recurringEndDate == null) {
+              _recurringEndDate = _date.add(const Duration(days: 120));
             }
           });
         }
@@ -1002,7 +991,7 @@ class _TaskFormState extends State<TaskForm> {
                   ),
                 ),
                 Text(
-                  _isRecurring ? 'Repeats weekly/bi-weekly' : 'Enable for regular classes',
+                  _isRecurring ? 'Repeats weekly/bi-weekly' : 'Enable recurring for this class',
                   style: TextStyle(
                     fontSize: 12,
                     color: isDarkMode ? Colors.white54 : AppColors.inkSoft,
@@ -1016,12 +1005,12 @@ class _TaskFormState extends State<TaskForm> {
             onChanged: (value) {
               setState(() {
                 _isRecurring = value;
-                if (value && _expectedEndDate == null) {
-                  _expectedEndDate = _date.add(const Duration(days: 120));
+                if (value && _recurringEndDate == null) {
+                  _recurringEndDate = _date.add(const Duration(days: 120));
                 }
                 if (!value) {
                   _recurrenceFrequency = RecurrenceFrequency.none;
-                  _expectedEndDate = null;
+                  _recurringEndDate = null;
                 }
               });
             },
@@ -1046,7 +1035,7 @@ class _TaskFormState extends State<TaskForm> {
             Expanded(
               child: _buildFrequencyOption(
                 RecurrenceFrequency.weekly,
-                'Weekly',
+                'Weekly (7 days)',
                 Icons.repeat,
                 isDarkMode,
               ),
@@ -1055,7 +1044,7 @@ class _TaskFormState extends State<TaskForm> {
             Expanded(
               child: _buildFrequencyOption(
                 RecurrenceFrequency.biWeekly,
-                'Bi-Weekly',
+                'Bi-Weekly (14 days)',
                 Icons.repeat_on,
                 isDarkMode,
               ),
@@ -1110,19 +1099,19 @@ class _TaskFormState extends State<TaskForm> {
     );
   }
 
-  Widget _buildExpectedEndDatePicker() {
+  Widget _buildRecurringEndDatePicker() {
     final isDarkMode = widget.isDarkMode;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildLabel('Expected Last Class', isDarkMode),
+        _buildLabel('End Date (Last Class)', isDarkMode),
         const SizedBox(height: 8),
         GestureDetector(
           onTap: () async {
             final picked = await showDatePicker(
               context: context,
-              initialDate: _expectedEndDate ?? _date.add(const Duration(days: 120)),
+              initialDate: _recurringEndDate ?? _date.add(const Duration(days: 120)),
               firstDate: _date,
               lastDate: DateTime(2030),
               builder: (context, child) => Theme(
@@ -1136,7 +1125,7 @@ class _TaskFormState extends State<TaskForm> {
                 child: child!,
               ),
             );
-            if (picked != null) setState(() => _expectedEndDate = picked);
+            if (picked != null) setState(() => _recurringEndDate = picked);
           },
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1156,17 +1145,25 @@ class _TaskFormState extends State<TaskForm> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _expectedEndDate != null
-                            ? DateFormat('EEEE, MMMM d, yyyy').format(_expectedEndDate!)
-                            : 'Select expected last class date',
+                        _recurringEndDate != null
+                            ? DateFormat('EEEE, MMMM d, yyyy').format(_recurringEndDate!)
+                            : 'Select end date',
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight: _expectedEndDate != null ? FontWeight.w600 : FontWeight.w400,
-                          color: _expectedEndDate != null
+                          fontWeight: _recurringEndDate != null ? FontWeight.w600 : FontWeight.w400,
+                          color: _recurringEndDate != null
                               ? (isDarkMode ? Colors.white : AppColors.ink)
                               : (isDarkMode ? Colors.white54 : AppColors.inkSoft),
                         ),
                       ),
+                      if (_recurringEndDate != null)
+                        Text(
+                          '${_calculateDaysBetween(_date, _recurringEndDate!)} classes',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.primaryLight,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -1177,6 +1174,13 @@ class _TaskFormState extends State<TaskForm> {
         ),
       ],
     );
+  }
+
+  int _calculateDaysBetween(DateTime start, DateTime end) {
+    final interval = _recurrenceFrequency.days;
+    if (interval == 0) return 1;
+    final daysBetween = end.difference(start).inDays;
+    return (daysBetween / interval).floor() + 1;
   }
 
   // ==================== TASK TYPE SELECTOR ====================
@@ -1219,7 +1223,7 @@ class _TaskFormState extends State<TaskForm> {
           if (type != TaskType.classes) {
             _isRecurring = false;
             _recurrenceFrequency = RecurrenceFrequency.none;
-            _expectedEndDate = null;
+            _recurringEndDate = null;
           }
           if (type == TaskType.exam) {
             _examSubtype = ExamSubtype.classTest;
@@ -1266,8 +1270,6 @@ class _TaskFormState extends State<TaskForm> {
   }
 
   // ==================== OTHER UI WIDGETS ====================
-
-  // REMOVED: _buildFixedDateDisplay() - no longer needed for Lab Report
 
   Widget _buildTimeRangePicker() {
     final isDarkMode = widget.isDarkMode;
@@ -1663,8 +1665,7 @@ class _TaskFormState extends State<TaskForm> {
       _selectedReminders = [ReminderOption.oneDay, ReminderOption.twoHours];
     }
 
-    // For assignments, lab reports, and others, use the deadline date as the display date
-    // For other types, use the appropriate date
+    // Determine effective date
     DateTime effectiveDate;
     if ((_taskType == TaskType.assignment || _taskType == TaskType.labReport || _taskType == TaskType.others) && _deadline != null) {
       effectiveDate = DateTime(
@@ -1681,11 +1682,7 @@ class _TaskFormState extends State<TaskForm> {
       effectiveDate = _date;
     }
 
-    String? recurringGroupId;
-    if (_isRecurring && _taskType == TaskType.classes && _classSubtype == ClassSubtype.sessional) {
-      recurringGroupId = DateTime.now().millisecondsSinceEpoch.toString();
-    }
-
+    // ✅ Define variables before using them
     String? finalExamType;
     if (_taskType == TaskType.exam) {
       finalExamType = _examSubtype.label;
@@ -1694,6 +1691,23 @@ class _TaskFormState extends State<TaskForm> {
     String? classTypeLabel;
     if (_taskType == TaskType.classes) {
       classTypeLabel = _classSubtype.label;
+    }
+
+    // ✅ RECURRING CLASS FIELDS - Available for both Regular and Sessional
+    String? recurringGroupId;
+    DateTime? recurringStartDate;
+    DateTime? recurringEndDate;
+    RecurrenceFrequency recurrenceFreq = RecurrenceFrequency.none;
+    int recurringInstanceIndex = 0;
+    bool isRecurringParent = false;
+
+    if (_taskType == TaskType.classes && _isRecurring) {
+      recurringGroupId = DateTime.now().millisecondsSinceEpoch.toString();
+      recurringStartDate = _date;
+      recurringEndDate = _recurringEndDate ?? _date.add(const Duration(days: 120));
+      recurrenceFreq = _recurrenceFrequency;
+      recurringInstanceIndex = 0;
+      isRecurringParent = true;
     }
 
     // Build submission deadline with time for assignments
@@ -1742,14 +1756,20 @@ class _TaskFormState extends State<TaskForm> {
       experimentNo: _taskType == TaskType.labReport ? (experimentNo.isNotEmpty ? experimentNo : null) : null,
       experimentTitle: _taskType == TaskType.labReport ? (experimentTitle.isNotEmpty ? experimentTitle : null) : null,
       classType: classTypeLabel,
+      // ✅ Recurring fields - Available for both Regular and Sessional
       recurringGroupId: recurringGroupId,
-      recurrenceFrequency: _isRecurring && _classSubtype == ClassSubtype.sessional ? _recurrenceFrequency : RecurrenceFrequency.none,
-      expectedEndDate: _isRecurring && _classSubtype == ClassSubtype.sessional ? _expectedEndDate : null,
-      actualEndDate: null,
-      extensionStatus: _isRecurring && _classSubtype == ClassSubtype.sessional ? ExtensionStatus.active : ExtensionStatus.ended,
-      extensionCount: 0,
-      skippedDates: null,
-      isRecurringParent: _isRecurring && _classSubtype == ClassSubtype.sessional,
+      recurrenceFrequency: recurrenceFreq,
+      recurringStartDate: recurringStartDate,
+      recurringEndDate: recurringEndDate,
+      recurringInstanceIndex: recurringInstanceIndex,
+      isRecurringParent: isRecurringParent,
+      // ✅ Auto-completion fields (defaults)
+      autoCompleted: false,
+      autoCompletedAt: null,
+      autoCompletionSource: null,
+      extensionHistory: null,
+      totalExtensions: 0,
+      countedInStats: false,
       createdAt: widget.initialTask?.createdAt ?? DateTime.now(),
       updatedAt: DateTime.now(),
     );

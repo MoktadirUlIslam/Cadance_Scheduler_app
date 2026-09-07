@@ -17,31 +17,33 @@ class TaskManagerStatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Get stats from DataProvider
-    final totalTasks = dataProvider.totalTasksDone;
-    final totalClasses = dataProvider.totalClassesDone;
-    final totalAssignments = dataProvider.totalAssignmentsDone;
-    final totalLabReports = dataProvider.totalLabReportsDone;
-    final totalExams = dataProvider.totalExamsDone;
-    final totalOthers = dataProvider.totalOthersDone;
+    final stats = dataProvider.taskStats;
 
-    // Calculate total completed
-    final totalCompleted = totalClasses + totalAssignments +
-        totalLabReports + totalExams + totalOthers;
+    final totalTasks = stats?.totalTasks ?? 0;
+    final totalCompleted = stats?.totalCompleted ?? 0;
+    final totalOverdue = stats?.totalOverdue ?? 0;
+    final completionRate = totalTasks > 0 ? ((totalCompleted / totalTasks) * 100).round() : 0;
 
-    // Calculate completion rate
-    final completionRate = totalTasks > 0
-        ? ((totalCompleted / totalTasks) * 100).round()
-        : 0;
-
-    if (dataProvider.isLoadingTaskStats) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-        child: const Center(
-          child: SizedBox(
-            height: 16,
-            width: 16,
-            child: CircularProgressIndicator(strokeWidth: 2),
+    if (totalTasks == 0) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isDarkMode ? AppColors.darkCard.withOpacity(0.5) : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: isDarkMode ? AppColors.darkBorder : Colors.grey.shade200, width: 0.5),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.info_outline, size: 16, color: isDarkMode ? Colors.white54 : AppColors.inkSoft),
+              const SizedBox(width: 8),
+              Text(
+                'No tasks yet. Add your first task!',
+                style: TextStyle(fontSize: 12, color: isDarkMode ? Colors.white54 : AppColors.inkSoft),
+              ),
+            ],
           ),
         ),
       );
@@ -49,57 +51,66 @@ class TaskManagerStatsRow extends StatelessWidget {
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 4),
-      child: Row(
+      child: Column(
         children: [
-          // Task Progress Card
-          Expanded(
-            child: StatCard(
-              icon: Icons.assignment_outlined,
-              iconBg: const Color(0xFFE3F2FD),
-              iconColor: Colors.blue,
-              value: '$totalCompleted/$totalTasks',
-              label: 'Progress',
-              sublabel: '$completionRate% complete',
-              isDarkMode: isDarkMode,
-            ),
+          // Row 1: Progress & Overdue
+          Row(
+            children: [
+              Expanded(
+                child: StatCard(
+                  icon: Icons.assignment_outlined,
+                  iconBg: const Color(0xFFE3F2FD),
+                  iconColor: Colors.blue,
+                  value: '$totalCompleted/$totalTasks',
+                  label: 'Progress',
+                  sublabel: '$completionRate% complete',
+                  isDarkMode: isDarkMode,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: StatCard(
+                  icon: Icons.more_horiz_outlined,
+                  iconBg: Colors.grey.withOpacity(0.1),
+                  iconColor: Colors.grey,
+                  value: (stats?.totalOthers ?? 0).toString(),
+                  label: 'Others',
+                  sublabel: totalTasks > 0 ? '${((stats?.totalOthers ?? 0) / totalTasks * 100).round()}%' : '0%',
+                  isDarkMode: isDarkMode,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: StatCard(
-              icon: Icons.class_outlined,
-              iconBg: const Color(0xFFE8F5E9),
-              iconColor: Colors.green,
-              value: totalClasses.toString(),
-              label: 'Classes',
-              sublabel: '${totalTasks > 0 ? ((totalClasses / totalTasks) * 100).round() : 0}%',
-              isDarkMode: isDarkMode,
-            ),
+          const SizedBox(height: 6),
+
+          // Row 2: Task Types (Classes, Assignments, Lab Reports, Exams)
+          Row(
+            children: [
+              _buildTypeCard(Icons.class_outlined, AppColors.primaryLight, stats?.totalClasses ?? 0, totalTasks, 'Classes'),
+              const SizedBox(width: 6),
+              _buildTypeCard(Icons.assignment_outlined, AppColors.purple, stats?.totalAssignments ?? 0, totalTasks, 'Assignments'),
+              const SizedBox(width: 6),
+              _buildTypeCard(Icons.science_outlined, AppColors.successLight, stats?.totalLabReports ?? 0, totalTasks, 'Lab Reports'),
+              const SizedBox(width: 6),
+              _buildTypeCard(Icons.quiz_outlined, AppColors.accentLight, stats?.totalExams ?? 0, totalTasks, 'Exams'),
+            ],
           ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: StatCard(
-              icon: Icons.assignment_outlined,
-              iconBg: const Color(0xFFF3E5F5),
-              iconColor: Colors.purple,
-              value: totalAssignments.toString(),
-              label: 'Assignments',
-              sublabel: '${totalTasks > 0 ? ((totalAssignments / totalTasks) * 100).round() : 0}%',
-              isDarkMode: isDarkMode,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Expanded(
-            child: StatCard(
-              icon: Icons.science_outlined,
-              iconBg: const Color(0xFFFFF3E0),
-              iconColor: Colors.orange,
-              value: totalLabReports.toString(),
-              label: 'Lab Reports',
-              sublabel: '${totalTasks > 0 ? ((totalLabReports / totalTasks) * 100).round() : 0}%',
-              isDarkMode: isDarkMode,
-            ),
-          ),
+          const SizedBox(height: 6),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTypeCard(IconData icon, Color color, int count, int total, String label) {
+    return Expanded(
+      child: StatCard(
+        icon: icon,
+        iconBg: color.withOpacity(0.1),
+        iconColor: color,
+        value: count.toString(),
+        label: label,
+        sublabel: total > 0 ? '${(count / total * 100).round()}%' : '0%',
+        isDarkMode: isDarkMode,
       ),
     );
   }
