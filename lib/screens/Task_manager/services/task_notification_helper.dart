@@ -7,71 +7,68 @@ import '../../../services/notification_service.dart';
 import '../../../utilites/app_colors.dart';
 
 class TaskNotificationHelper {
-  // Use a single instance of NotificationService
   final NotificationService _notificationService = NotificationService();
-
-  // Track if initialized
   bool _isInitialized = false;
+  bool _isInitializing = false;
 
-  /// Initialize the notification helper
   Future<void> initialize() async {
     if (_isInitialized) return;
-    await _ensureInitialized();
-    _isInitialized = true;
-    print('✅ TaskNotificationHelper initialized');
-  }
+    if (_isInitializing) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      return;
+    }
 
-  // Initialize if needed
-  Future<void> _ensureInitialized() async {
-    if (!_isInitialized) {
+    _isInitializing = true;
+    try {
       await _notificationService.initialize();
       _isInitialized = true;
+      print('✅ TaskNotificationHelper initialized');
+    } catch (e) {
+      print('⚠️ NotificationService initialization failed: $e');
+    } finally {
+      _isInitializing = false;
     }
   }
 
+  bool get isAvailable => _isInitialized;
+
+  // ============================================================
+  // SCHEDULE TASK NOTIFICATIONS
+  // ============================================================
+
   Future<void> scheduleTaskNotifications(Task task) async {
     try {
-      // Early return if notifications are disabled
       if (!task.alarmOn) {
         print('🔕 Notifications disabled for "${task.displayTitle}"');
         return;
       }
 
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) {
+        print('⚠️ Notifications not available');
+        return;
+      }
 
-      // Get reminders - if empty, add default ones
       List<ReminderOption> reminders = List.from(task.reminders);
       if (reminders.isEmpty) {
         reminders = [ReminderOption.oneDay, ReminderOption.twoHours];
       }
 
-      // Determine the base time for notifications
       DateTime? baseTime;
 
       if (task.type == TaskType.assignment) {
-        // For Assignment, use the deadline date
         baseTime = task.deadline;
-
-        // Also schedule a reminder 2 days before the deadline
-        // Add "2 days before" reminder if not already present
         if (!reminders.contains(ReminderOption.twoDays)) {
           reminders.add(ReminderOption.twoDays);
         }
       } else if (task.type == TaskType.labReport) {
-        // For Lab Report, use the deadline
-        baseTime = task.deadline;
-        // If no deadline, use the date as fallback
-        if (baseTime == null) {
-          baseTime = task.date;
-        }
+        baseTime = task.deadline ?? task.date;
       } else {
-        // For other types, use start time or date
         baseTime = task.startTime ?? task.date;
       }
 
       if (baseTime == null) {
-        print('⚠️ No base time available for "${task.displayTitle}"');
+        print('⚠️ No base time for "${task.displayTitle}"');
         return;
       }
 
@@ -89,7 +86,6 @@ class TaskNotificationHelper {
         final reminder = reminders[i];
         final notificationTime = baseTime.subtract(reminder.duration);
 
-        // Only schedule if notification time is in the future
         if (notificationTime.isAfter(DateTime.now())) {
           final notificationId = (baseId + i + 1).abs();
 
@@ -105,36 +101,131 @@ class TaskNotificationHelper {
           );
 
           scheduledCount++;
-          print('   ✅ Scheduled notification #${i + 1} for "${task.displayTitle}" at $notificationTime');
-          print('      Reminder: ${reminder.label} (ID: $notificationId)');
+          print('   ✅ Scheduled #${i + 1}: ${reminder.label} at $notificationTime');
         } else {
-          print('   ⏭️ Skipping notification for "${task.displayTitle}" at $notificationTime (already passed)');
+          print('   ⏭️ Skipping ${reminder.label} (already passed)');
         }
       }
 
-      if (scheduledCount > 0) {
-        print('✅ Scheduled $scheduledCount notifications for "${task.displayTitle}"');
-      } else {
-        print('ℹ️ No notifications scheduled for "${task.displayTitle}" (all reminder times passed)');
-      }
-
+      print('✅ Scheduled $scheduledCount notifications for "${task.displayTitle}"');
     } catch (e) {
-      print('❌ Error scheduling task notifications for "${task.displayTitle}": $e');
+      print('❌ Error scheduling notifications: $e');
     }
   }
 
-  // Send task completion notification
+  // ============================================================
+  // CANCEL TASK NOTIFICATIONS (FIXED)
+  // ============================================================
+
+  /// Cancel all notifications for a specific task
+  Future<void> cancelTaskNotifications(String taskId) async {
+    try {
+      await initialize();
+      if (!_isInitialized) return;
+
+      // Get all pending notifications
+      final pending = await _notificationService.getPendingNotifications();
+
+      // Find notifications for this task (using taskId as part of the notification ID)
+      // We use a specific ID pattern: taskId.hashCode + i
+      final taskIdHash = taskId.hashCode.abs();
+
+      int cancelledCount = 0;
+      for (final notification in pending) {
+        // Check if this notification belongs to this task
+        // We use the pattern: (taskIdHash + i) where i is 1-10
+        for (int i = 1; i <= 10; i++) {
+          final expectedId = (taskIdHash + i).abs();
+          if (notification.id == expectedId) {
+            await _notificationService.cancelNotification(notification.id);
+            cancelledCount++;
+            break;
+          }
+        }
+      }
+
+      print('✅ Cancelled $cancelledCount notifications for task: $taskId');
+    } catch (e) {
+      print('❌ Error cancelling notifications for task $taskId: $e');
+    }
+  }
+
+  /// Cancel a specific notification by ID
+  Future<void> cancelSpecificNotification(int notificationId) async {
+    try {
+      await initialize();
+      if (!_isInitialized) return;
+
+      await _notificationService.cancelNotification(notificationId.abs());
+      print('✅ Cancelled notification: ${notificationId.abs()}');
+    } catch (e) {
+      print('❌ Error cancelling notification $notificationId: $e');
+    }
+  }
+
+  // ============================================================
+  // HOURLY REMINDER
+  // ============================================================
+
+  Future<void> scheduleHourlyReminder({
+    required Task task,
+    required int hour,
+    required int totalHours,
+    required int notificationId,
+    required DateTime scheduledTime,
+  }) async {
+    try {
+      await initialize();
+      if (!_isInitialized) return;
+
+      final title = '⏰ Deadline Reminder: ${task.displayTitle}';
+      final buffer = StringBuffer();
+      buffer.writeln('📋 Task: ${task.displayTitle}');
+      buffer.writeln('📌 Type: ${task.type.label}');
+      buffer.writeln();
+
+      if (task.courseCode != null && task.courseCode!.isNotEmpty) {
+        buffer.writeln('📖 Course: ${task.courseCode}');
+      }
+
+      buffer.writeln('📅 Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
+      buffer.writeln();
+      buffer.writeln('⏰ ${hour}h reminder (${totalHours - hour}h remaining)');
+      buffer.writeln();
+      buffer.writeln('⚠️ Please complete your task before the deadline!');
+
+      await _notificationService.scheduleTaskNotification(
+        notificationId: notificationId,
+        title: title,
+        body: buffer.toString(),
+        scheduledTime: scheduledTime,
+        color: Colors.orange,
+      );
+
+      print('📬 Scheduled hourly reminder #$hour');
+    } catch (e) {
+      print('❌ Error scheduling hourly reminder: $e');
+    }
+  }
+
+  // ============================================================
+  // SEND COMPLETION NOTIFICATION
+  // ============================================================
+
   Future<void> sendTaskCompletionNotification({
     required Task task,
     required String message,
   }) async {
     try {
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) {
+        print('⚠️ Notifications not available');
+        return;
+      }
 
-      final title = task.isDone ? '✅ Task Completed!' : '⏳ Task Pending';
+      final isAuto = task.autoCompleted;
+      final title = isAuto ? '🤖 Task Auto-Completed!' : '✅ Task Completed!';
 
-      // Better body formatting
       final buffer = StringBuffer();
       buffer.writeln(message);
       buffer.writeln();
@@ -149,35 +240,41 @@ class TaskNotificationHelper {
         buffer.writeln('📅 Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
       }
 
-      buffer.writeln('📊 Status: ${task.isDone ? '✅ Completed' : '⏳ Pending'}');
+      buffer.writeln('📊 Status: ${isAuto ? '🤖 Auto-Completed' : '✅ Completed'}');
       buffer.writeln();
-      buffer.writeln(task.isDone ? '🎉 Great job!' : '💪 Keep going!');
 
-      // Use a unique ID
+      if (isAuto) {
+        buffer.writeln('💡 Automatically marked as completed');
+      } else {
+        buffer.writeln('🎉 Great job!');
+      }
+
       final notificationId = DateTime.now().millisecondsSinceEpoch.abs();
 
-      await _notificationService.scheduleTaskNotification(
+      await _notificationService.showImmediateNotification(
         notificationId: notificationId,
         title: title,
         body: buffer.toString(),
-        scheduledTime: DateTime.now().add(const Duration(seconds: 2)),
-        color: task.isDone ? Colors.green : Colors.orange,
+        color: isAuto ? Colors.purple : Colors.green,
       );
 
-      print('✅ Sent task completion notification for "${task.displayTitle}"');
+      print('${isAuto ? '🤖' : '✅'} Sent completion notification for "${task.displayTitle}"');
     } catch (e) {
-      print('❌ Error sending task completion notification: $e');
+      print('❌ Error sending completion notification: $e');
     }
   }
 
-  // Send deadline extension notification
+  // ============================================================
+  // SEND DEADLINE EXTENSION NOTIFICATION
+  // ============================================================
+
   Future<void> sendDeadlineExtensionNotification({
     required Task task,
     required String message,
   }) async {
     try {
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) return;
 
       final title = '⏰ Deadline Extended!';
 
@@ -191,33 +288,39 @@ class TaskNotificationHelper {
         buffer.writeln('📅 New Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
       }
 
+      if (task.totalExtensions > 0) {
+        buffer.writeln('📊 Extension #${task.totalExtensions}');
+      }
+
       buffer.writeln();
-      buffer.writeln('⚠️ Please complete your task before the new deadline!');
+      buffer.writeln('⚠️ Please complete before the new deadline!');
 
       final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 1;
 
-      await _notificationService.scheduleTaskNotification(
+      await _notificationService.showImmediateNotification(
         notificationId: notificationId,
         title: title,
         body: buffer.toString(),
-        scheduledTime: DateTime.now().add(const Duration(seconds: 3)),
         color: Colors.orange,
       );
 
-      print('✅ Sent deadline extension notification for "${task.displayTitle}"');
+      print('✅ Sent deadline extension notification');
     } catch (e) {
-      print('❌ Error sending deadline extension notification: $e');
+      print('❌ Error sending deadline extension: $e');
     }
   }
 
-  // Send overdue reminder notification
+  // ============================================================
+  // SEND OVERDUE REMINDER
+  // ============================================================
+
   Future<void> sendOverdueReminderNotification({
     required Task task,
     required String message,
   }) async {
     try {
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) return;
 
       final title = '⚠️ Task Overdue!';
 
@@ -232,36 +335,40 @@ class TaskNotificationHelper {
       }
 
       buffer.writeln();
-      buffer.writeln('⏰ Please complete or update this task!');
+      buffer.writeln('⏰ Please complete this task!');
 
       final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 2;
 
-      await _notificationService.scheduleTaskNotification(
+      await _notificationService.showImmediateNotification(
         notificationId: notificationId,
         title: title,
         body: buffer.toString(),
-        scheduledTime: DateTime.now().add(const Duration(seconds: 2)),
         color: Colors.red,
       );
 
-      print('✅ Sent overdue reminder for "${task.displayTitle}"');
+      print('✅ Sent overdue reminder');
     } catch (e) {
       print('❌ Error sending overdue reminder: $e');
     }
   }
 
-  // Send daily summary notification
+  // ============================================================
+  // SEND DAILY SUMMARY
+  // ============================================================
+
   Future<void> sendDailySummaryNotification({
     required List<Task> tasks,
     required String message,
   }) async {
     try {
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) return;
 
       final completedCount = tasks.where((t) => t.isDone).length;
+      final autoCompletedCount = tasks.where((t) => t.isDone && t.autoCompleted).length;
       final pendingCount = tasks.where((t) => !t.isDone).length;
       final overdueCount = tasks.where((t) => !t.isDone && t.isOverdue).length;
+      final extendedCount = tasks.where((t) => t.totalExtensions > 0).length;
 
       final buffer = StringBuffer();
       buffer.writeln(message);
@@ -269,8 +376,14 @@ class TaskNotificationHelper {
       buffer.writeln('📊 Today\'s Summary:');
       buffer.writeln('   • Total Tasks: ${tasks.length}');
       buffer.writeln('   • ✅ Completed: $completedCount');
+      if (autoCompletedCount > 0) {
+        buffer.writeln('   • 🤖 Auto-Completed: $autoCompletedCount');
+      }
       buffer.writeln('   • ⏳ Pending: $pendingCount');
       buffer.writeln('   • ⚠️ Overdue: $overdueCount');
+      if (extendedCount > 0) {
+        buffer.writeln('   • ⏰ Extended: $extendedCount');
+      }
 
       if (pendingCount > 0) {
         buffer.writeln();
@@ -285,62 +398,40 @@ class TaskNotificationHelper {
         }
       }
 
-      if (overdueCount > 0) {
-        buffer.writeln();
-        buffer.writeln('⚠️ You have $overdueCount overdue tasks that need attention!');
-      }
-
-      final title = '📋 Daily Task Summary';
       final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 3;
 
-      await _notificationService.scheduleTaskNotification(
+      await _notificationService.showImmediateNotification(
         notificationId: notificationId,
-        title: title,
+        title: '📋 Daily Task Summary',
         body: buffer.toString(),
-        scheduledTime: DateTime.now().add(const Duration(seconds: 2)),
         color: AppColors.primaryLight,
       );
 
-      print('✅ Sent daily summary notification');
+      print('✅ Sent daily summary');
     } catch (e) {
       print('❌ Error sending daily summary: $e');
     }
   }
 
-  // Schedule periodic reminders for overdue tasks
+  // ============================================================
+  // SCHEDULE OVERDUE REMINDERS (FIXED - removed duplicate)
+  // ============================================================
+
   Future<void> scheduleOverdueReminders(Task task) async {
     try {
-      if (!task.alarmOn) {
-        print('🔕 Overdue reminders disabled for "${task.displayTitle}"');
-        return;
-      }
+      if (!task.alarmOn || task.isDone || !task.isOverdue) return;
 
-      if (task.isDone) {
-        print('✅ "${task.displayTitle}" is already completed');
-        return;
-      }
+      await initialize();
+      if (!_isInitialized) return;
 
-      if (!task.isOverdue) {
-        print('ℹ️ "${task.displayTitle}" is not overdue');
-        return;
-      }
-
-      // Ensure initialization
-      await _ensureInitialized();
-
-      // Get interval based on task type
       final interval = task.reminderInterval;
 
-      // Send reminder now
       await sendOverdueReminderNotification(
         task: task,
-        message: '⏰ "${task.displayTitle}" is overdue! Please complete it soon.',
+        message: '⏰ "${task.displayTitle}" is overdue!',
       );
 
-      // Schedule next reminder after interval
       final nextReminderTime = DateTime.now().add(interval);
-
-      // Use a unique ID for the scheduled reminder
       final notificationId = (task.id.hashCode + 999).abs();
 
       final buffer = StringBuffer();
@@ -353,7 +444,7 @@ class TaskNotificationHelper {
       }
 
       buffer.writeln();
-      buffer.writeln('Please complete this task as soon as possible! ⏰');
+      buffer.writeln('Please complete this task soon! ⏰');
 
       await _notificationService.scheduleTaskNotification(
         notificationId: notificationId,
@@ -363,237 +454,95 @@ class TaskNotificationHelper {
         color: Colors.red,
       );
 
-      print('✅ Scheduled overdue reminder for "${task.displayTitle}" at $nextReminderTime (ID: $notificationId)');
+      print('✅ Scheduled overdue reminder');
     } catch (e) {
-      print('❌ Error scheduling overdue reminder for "${task.displayTitle}": $e');
+      print('❌ Error scheduling overdue reminder: $e');
     }
   }
 
-  // Cancel all notifications for a task
-  Future<void> cancelTaskNotifications(String taskId) async {
-    try {
-      // Ensure initialization
-      await _ensureInitialized();
+  // ============================================================
+  // BATCH SCHEDULING
+  // ============================================================
 
-      await _notificationService.cancelAllNotifications();
-      print('✅ Cancelled all notifications for task: $taskId');
-    } catch (e) {
-      print('❌ Error cancelling notifications for task $taskId: $e');
-    }
-  }
-
-  // Cancel specific notification
-  Future<void> cancelSpecificNotification(int notificationId) async {
-    try {
-      // Ensure initialization
-      await _ensureInitialized();
-
-      await _notificationService.cancelNotification(notificationId.abs());
-      print('✅ Cancelled notification: ${notificationId.abs()}');
-    } catch (e) {
-      print('❌ Error cancelling notification $notificationId: $e');
-    }
-  }
-
-  // Schedule notifications for multiple tasks
   Future<void> scheduleAllTaskNotifications(List<Task> tasks) async {
     if (tasks.isEmpty) {
-      print('📋 No tasks to schedule notifications for');
+      print('📋 No tasks to schedule');
       return;
     }
 
     try {
-      // Ensure initialization
-      await _ensureInitialized();
+      await initialize();
+      if (!_isInitialized) {
+        print('⚠️ Notifications not available');
+        return;
+      }
 
-      print('📋 Scheduling notifications for ${tasks.length} tasks');
-
-      int scheduledCount = 0;
-      int overdueCount = 0;
+      print('📋 Scheduling ${tasks.length} tasks');
 
       for (var task in tasks) {
         await scheduleTaskNotifications(task);
-
-        // Schedule overdue reminders for overdue tasks
         if (task.isOverdue && !task.isDone) {
           await scheduleOverdueReminders(task);
-          overdueCount++;
         }
-
-        scheduledCount++;
       }
 
-      print('✅ All notifications scheduled for $scheduledCount tasks ($overdueCount overdue)');
+      print('✅ All notifications scheduled');
     } catch (e) {
-      print('❌ Error scheduling all task notifications: $e');
+      print('❌ Error scheduling all: $e');
     }
   }
 
-  // Build notification title with task type and display title
+  // ============================================================
+  // CLEAR ALL NOTIFICATIONS
+  // ============================================================
+
+  Future<void> clearAllNotifications() async {
+    try {
+      await initialize();
+      if (!_isInitialized) return;
+      await _notificationService.cancelAllNotifications();
+      print('✅ Cleared all notifications');
+    } catch (e) {
+      print('❌ Error clearing: $e');
+    }
+  }
+
+  // ============================================================
+  // PRIVATE HELPERS
+  // ============================================================
+
   String _buildNotificationTitle(Task task) {
     final typeEmoji = _getTypeEmoji(task.type);
-    final displayName = task.displayTitle.isNotEmpty ? task.displayTitle : 'Task';
-    return '$typeEmoji ${task.type.label}: $displayName';
+    return '$typeEmoji ${task.type.label}: ${task.displayTitle}';
   }
 
-  // Build notification body with all task details (without Priority and Reminder)
   String _buildNotificationBody(Task task) {
     final buffer = StringBuffer();
+    buffer.writeln('📋 ${task.displayTitle}');
+    buffer.writeln('📌 ${task.type.label}');
 
-    // Task Type
-    buffer.writeln('📋 Type: ${task.type.label}');
-
-    // Course Code and Title (if available)
     if (task.courseCode != null && task.courseCode!.isNotEmpty) {
-      buffer.writeln('📖 Course: ${task.courseCode}');
-    }
-    if (task.courseTitle != null && task.courseTitle!.isNotEmpty) {
-      buffer.writeln('📚 ${task.courseTitle}');
+      buffer.writeln('📖 ${task.courseCode}');
     }
 
-    // Type-specific details
-    switch (task.type) {
-      case TaskType.assignment:
-        if (task.title != null && task.title!.isNotEmpty) {
-          buffer.writeln('📝 Topic: ${task.title}');
-        }
-        if (task.deadline != null) {
-          buffer.writeln('📅 Submission Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
-        }
-        break;
-
-      case TaskType.labReport:
-        if (task.experimentNo != null && task.experimentNo!.isNotEmpty) {
-          buffer.writeln('🔬 Experiment: ${task.experimentNo}');
-        }
-        if (task.experimentTitle != null && task.experimentTitle!.isNotEmpty) {
-          buffer.writeln('📖 ${task.experimentTitle}');
-        }
-        if (task.deadline != null) {
-          buffer.writeln('📅 Submission Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
-        }
-        break;
-
-      case TaskType.exam:
-        if (task.examType != null && task.examType!.isNotEmpty) {
-          buffer.writeln('📝 ${task.examType}');
-        }
-        // Class Test details (when examType is "Class Test")
-        if (task.examType == 'Class Test') {
-          if (task.classTestNo != null && task.classTestNo!.isNotEmpty) {
-            buffer.writeln('📝 Test #${task.classTestNo}');
-          }
-          if (task.testTopic != null && task.testTopic!.isNotEmpty) {
-            buffer.writeln('📖 ${task.testTopic}');
-          }
-        }
-        break;
-
-      case TaskType.others:
-        if (task.title != null && task.title!.isNotEmpty) {
-          buffer.writeln('📌 ${task.title}');
-        }
-        if (task.deadline != null) {
-          buffer.writeln('📅 Deadline: ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
-        }
-        break;
-
-      case TaskType.classes:
-      // Classes don't have additional specific fields
-        break;
+    if (task.deadline != null) {
+      buffer.writeln('📅 ${DateFormat('MMM d, yyyy h:mm a').format(task.deadline!)}');
     }
 
-    // Time (if available) - for Classes and Exam
-    if (task.startTime != null && task.endTime != null) {
-      buffer.writeln('⏰ ${_formatTime(task.startTime!)} - ${_formatTime(task.endTime!)}');
-    }
-
-    // Location/Room (if available)
     if (task.location != null && task.location!.isNotEmpty) {
-      buffer.writeln('📍 Room: ${task.location}');
-    }
-
-    // Teacher(s) (if available)
-    if (task.teacherName != null && task.teacherName!.isNotEmpty) {
-      buffer.writeln('👨‍🏫 Teacher: ${task.teacherName}');
-    }
-    if (task.teacherName2 != null && task.teacherName2!.isNotEmpty) {
-      buffer.writeln('👨‍🏫 Second Teacher: ${task.teacherName2}');
-    }
-
-    // Description (if available)
-    if (task.description != null && task.description!.isNotEmpty) {
-      buffer.writeln('📝 ${task.description}');
-    }
-
-    // Status (if completed)
-    if (task.isDone) {
-      buffer.writeln('✅ Status: Completed');
+      buffer.writeln('📍 ${task.location}');
     }
 
     return buffer.toString();
   }
 
-  // Format time helper
-  String _formatTime(DateTime time) {
-    final hour = time.hour > 12 ? time.hour - 12 : time.hour;
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    final displayHour = time.hour == 0 ? 12 : hour;
-    return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
-  }
-
-  // Get emoji for task type
   String _getTypeEmoji(TaskType type) {
     switch (type) {
-      case TaskType.classes:
-        return '🏫';
-      case TaskType.assignment:
-        return '📝';
-      case TaskType.labReport:
-        return '🔬';
-      case TaskType.exam:
-        return '📚';
-      case TaskType.others:
-        return '📌';
+      case TaskType.classes: return '🏫';
+      case TaskType.assignment: return '📝';
+      case TaskType.labReport: return '🔬';
+      case TaskType.exam: return '📚';
+      case TaskType.others: return '📌';
     }
-  }
-
-  // New method: Clear all notifications
-  Future<void> clearAllNotifications() async {
-    try {
-      await _ensureInitialized();
-      await _notificationService.cancelAllNotifications();
-      print('✅ Cleared all notifications');
-    } catch (e) {
-      print('❌ Error clearing all notifications: $e');
-    }
-  }
-
-  // New method: Check if notifications are enabled
-  bool areNotificationsEnabled(Task task) {
-    return task.alarmOn && task.reminders.isNotEmpty;
-  }
-
-  // New method: Get next reminder time for a task
-  DateTime? getNextReminderTime(Task task) {
-    if (!task.alarmOn || task.reminders.isEmpty) return null;
-
-    DateTime? baseTime;
-    if (task.type == TaskType.assignment || task.type == TaskType.labReport) {
-      baseTime = task.deadline ?? task.date;
-    } else {
-      baseTime = task.startTime ?? task.date;
-    }
-
-    if (baseTime == null) return null;
-
-    // Get the earliest reminder
-    final earliestReminder = task.reminders
-        .map((r) => baseTime!.subtract(r.duration))
-        .where((t) => t.isAfter(DateTime.now()))
-        .toList()
-      ..sort();
-
-    return earliestReminder.isNotEmpty ? earliestReminder.first : null;
   }
 }

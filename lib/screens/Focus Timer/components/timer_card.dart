@@ -3,8 +3,48 @@ import 'package:flutter/material.dart';
 import 'package:pomodoro/utilites/app_colors.dart';
 import 'dart:async';
 import 'dart:math' as math;
-
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../services/forced_return_service.dart';
+import '../services/PhoneLockService.dart';
+
+// ─── TIMER STATE MANAGER ───
+class _TimerStateManager {
+  static const String _key = 'timer_card_state';
+
+  static Future<void> saveState(Map<String, dynamic> state) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonString = jsonEncode(state);
+      await prefs.setString(_key, jsonString);
+    } catch (e) {
+      print('Error saving timer state: $e');
+    }
+  }
+
+  static Future<Map<String, dynamic>?> getState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonString = prefs.getString(_key);
+      if (jsonString != null) {
+        return jsonDecode(jsonString) as Map<String, dynamic>;
+      }
+      return null;
+    } catch (e) {
+      print('Error getting timer state: $e');
+      return null;
+    }
+  }
+
+  static Future<void> clearState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_key);
+    } catch (e) {
+      print('Error clearing timer state: $e');
+    }
+  }
+}
 
 class TimerCard extends StatefulWidget {
   final int studyMinutes;
@@ -44,7 +84,7 @@ class TimerCard extends StatefulWidget {
   State<TimerCard> createState() => _TimerCardState();
 }
 
-class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
+class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin, WidgetsBindingObserver {
   // Timer state
   bool _isRunning = false;
   bool _isStudyPhase = true;
@@ -64,6 +104,10 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
   // Break warning
   bool _breakWarningTriggered = false;
   bool _isWaitingForUserReturn = false;
+
+  // Lock state
+  bool _isPausedByBackground = false;
+  bool _isFullLockActive = false;
 
   // Timers and controllers
   Timer? _timer;
@@ -114,6 +158,8 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _totalSeconds = widget.studyMinutes * 60;
     _remainingSeconds = _totalSeconds;
     _progress = 0.0;
@@ -179,21 +225,21 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
 
     _syncNotificationState();
     ForcedReturnService.setOnUserReturned(_handleUserReturned);
+
+    // Restore timer state
+    _restoreTimerState();
   }
 
   @override
   void didUpdateWidget(TimerCard oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // Prevent operations if disposed
     if (_isDisposed) return;
 
-    // Check notification state change
     if (oldWidget.notificationsEnabled != widget.notificationsEnabled) {
       _syncNotificationState();
     }
 
-    // Handle completion state changes
     if (widget.isAllSessionsComplete && !oldWidget.isAllSessionsComplete) {
       _celebrationController.forward();
       _stopTimer();
@@ -202,14 +248,13 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
         _pulseController.stop();
         _waterAnimationController.stop();
       });
+      _disableFullLockIfNeeded();
     }
 
-    // Reset if completion was reset
     if (!widget.isAllSessionsComplete && oldWidget.isAllSessionsComplete) {
       _resetToDefaultState();
     }
 
-    // Update timer settings if changed
     if (oldWidget.studyMinutes != widget.studyMinutes ||
         oldWidget.breakMinutes != widget.breakMinutes ||
         oldWidget.totalSessions != widget.totalSessions ||
@@ -232,26 +277,129 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
   @override
   void dispose() {
     _isDisposed = true;
+    WidgetsBinding.instance.removeObserver(this);
 
-    // Cancel timer first
+    _saveTimerState();
     _stopTimer();
 
-    // Dispose all animation controllers
     _pulseController.dispose();
     _waterAnimationController.dispose();
     _placeholderAnimController.dispose();
     _sessionAnimController.dispose();
     _celebrationController.dispose();
 
-    // Clear callback
     ForcedReturnService.setOnUserReturned(null);
 
+    // Ensure lock is disabled
+    _disableFullLockIfNeeded();
+
     super.dispose();
+  }
+
+  // ─── LIFECYCLE OBSERVER ───
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_isDisposed || !mounted) return;
+
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      // Save state when going to background
+      _saveTimerState();
+
+      if (_isRunning && widget.isFocusModeLocked && _isStudyPhase) {
+        // Keep lock active even in background
+        PhoneLockService.enableFullLock();
+        _isPausedByBackground = true;
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      // Restore state when returning
+      _restoreTimerState();
+
+      if (_isRunning && _isPausedByBackground) {
+        _isPausedByBackground = false;
+        // Timer should continue running
+        _startTimer();
+      }
+
+      if (widget.isFocusModeLocked && _isRunning && _isStudyPhase) {
+        // Re-enable lock on resume
+        PhoneLockService.enableFullLock();
+        _isFullLockActive = true;
+      }
+    }
+  }
+
+  // ─── PERSISTENCE ───
+  void _saveTimerState() {
+    try {
+      final Map<String, dynamic> state = {
+        'isRunning': _isRunning,
+        'isStudyPhase': _isStudyPhase,
+        'remainingSeconds': _remainingSeconds,
+        'elapsedSeconds': _elapsedSeconds,
+        'completedSessions': _completedSessions,
+        'currentSession': _currentSession,
+        'progress': _progress,
+        'totalSeconds': _totalSeconds,
+        'hasStartedOnce': _hasStartedOnce,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+      _TimerStateManager.saveState(state);
+    } catch (e) {
+      print('Error saving timer state: $e');
+    }
+  }
+
+  void _restoreTimerState() {
+    try {
+      _TimerStateManager.getState().then((state) {
+        if (state != null && mounted && !_isDisposed) {
+          setState(() {
+            _isRunning = state['isRunning'] ?? false;
+            _isStudyPhase = state['isStudyPhase'] ?? true;
+            _remainingSeconds = state['remainingSeconds'] ?? _totalSeconds;
+            _elapsedSeconds = state['elapsedSeconds'] ?? 0;
+            _completedSessions = state['completedSessions'] ?? 0;
+            _currentSession = state['currentSession'] ?? 1;
+            _progress = state['progress'] ?? 0.0;
+            _totalSeconds = state['totalSeconds'] ?? _totalSeconds;
+            _hasStartedOnce = state['hasStartedOnce'] ?? false;
+          });
+
+          // Resume timer if it was running
+          if (_isRunning && !_isDisposed) {
+            _startTimer();
+            if (widget.isFocusModeLocked && _isStudyPhase) {
+              PhoneLockService.enableFullLock();
+              _isFullLockActive = true;
+            }
+          }
+        }
+      });
+    } catch (e) {
+      print('Error restoring timer state: $e');
+    }
   }
 
   // ─── SYNC NOTIFICATION STATE ───
   void _syncNotificationState() {
     ForcedReturnService.setNotificationsEnabled(widget.notificationsEnabled);
+  }
+
+  // ─── LOCK MANAGEMENT ───
+  void _enableFullLockIfNeeded() {
+    if (widget.isFocusModeLocked && _isRunning && _isStudyPhase && !_isFullLockActive) {
+      PhoneLockService.enableFullLock();
+      _isFullLockActive = true;
+      print('🔒 Full lock enabled');
+    }
+  }
+
+  void _disableFullLockIfNeeded() {
+    if (_isFullLockActive) {
+      PhoneLockService.disableFullLock();
+      _isFullLockActive = false;
+      print('🔓 Full lock disabled');
+    }
   }
 
   // ─── TIMER MANAGEMENT ───
@@ -274,6 +422,11 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
           _remainingSeconds--;
           _elapsedSeconds++;
           _updateProgress();
+
+          // Save state periodically
+          if (_elapsedSeconds % 10 == 0) {
+            _saveTimerState();
+          }
 
           // Break warning
           if (!_isStudyPhase &&
@@ -319,13 +472,20 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
         _waterAnimationController.repeat();
         widget.onTimerStarted?.call();
         _startTimer();
+
+        // Enable full lock when starting in focus mode
+        _enableFullLockIfNeeded();
       } else {
         _pulseController.stop();
         _pulseController.value = 0;
         _waterAnimationController.stop();
         widget.onTimerStopped?.call();
         _stopTimer();
+
+        // Disable lock when paused
+        _disableFullLockIfNeeded();
       }
+      _saveTimerState();
     });
   }
 
@@ -366,6 +526,10 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
 
     widget.onPhaseChange?.call(false);
     widget.onTimerStopped?.call();
+    _saveTimerState();
+
+    // Ensure lock is disabled on reset
+    _disableFullLockIfNeeded();
   }
 
   // ─── RESET TO DEFAULT ───
@@ -400,6 +564,8 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
 
     widget.onResetAfterComplete?.call();
     widget.onTimerStopped?.call();
+    _TimerStateManager.clearState();
+    _disableFullLockIfNeeded();
   }
 
   // ─── PHASE SWITCHING ───
@@ -417,6 +583,7 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
         widget.onAllSessionsComplete?.call();
         widget.onTimerStopped?.call();
         _isPhaseSwitching = false;
+        _disableFullLockIfNeeded();
 
         _showPhaseCompletionDialog(
           'All Sessions Complete! 🎉',
@@ -437,6 +604,9 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
       _progress = 0.0;
       _isPhaseSwitching = false;
 
+      // Disable lock during break
+      _disableFullLockIfNeeded();
+
       _showPhaseCompletionDialog(
         'Session $_currentSession Complete! 🎉',
         'Great job! Time for a ${widget.breakMinutes}-minute break.\n${widget.totalSessions - _completedSessions} sessions remaining.',
@@ -451,6 +621,7 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
             widget.onTimerStarted?.call();
             _startTimer();
           });
+          _saveTimerState();
         }
       });
     } else {
@@ -465,6 +636,9 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
       _remainingSeconds = _totalSeconds;
       _elapsedSeconds = 0;
       _progress = 0.0;
+
+      // Re-enable lock for study phase
+      _enableFullLockIfNeeded();
 
       _sessionAnimController.reset();
       _sessionAnimController.forward();
@@ -483,6 +657,7 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
             widget.onTimerStarted?.call();
             _startTimer();
           });
+          _saveTimerState();
         }
       });
     }
@@ -873,6 +1048,7 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
                     final value = (_placeholderAnimController.value + delay) % 1.0;
                     final opacity = 0.3 + (math.sin(value * 2 * math.pi) + 1) * 0.35;
                     return Container(
+                      key: ValueKey('placeholder_dot_$index'), // ADDED: Unique key
                       margin: const EdgeInsets.symmetric(horizontal: 4),
                       width: 8,
                       height: 8,
@@ -920,8 +1096,10 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
             Row(
               children: [
                 AnimatedContainer(
+                  key: ValueKey('status_indicator_$_isRunning'), // ADDED: Unique key
                   duration: const Duration(milliseconds: 300),
-                  width: 8, height: 8,
+                  width: 8,
+                  height: 8,
                   decoration: BoxDecoration(
                     color: _isRunning
                         ? Colors.greenAccent
@@ -1009,6 +1187,7 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
             final isCurrent = index == _currentSession - 1 && _isStudyPhase;
 
             return AnimatedContainer(
+              key: ValueKey('session_indicator_$index'), // ADDED: Unique key
               duration: const Duration(milliseconds: 300),
               margin: const EdgeInsets.symmetric(horizontal: 3),
               width: isCurrent ? 28 : 20,
@@ -1033,8 +1212,10 @@ class _TimerCardState extends State<TimerCard> with TickerProviderStateMixin {
             ScaleTransition(
               scale: _pulseAnimation,
               child: SizedBox(
-                width: 90, height: 90,
+                width: 90,
+                height: 90,
                 child: WaterGlassProgress(
+                  key: ValueKey('water_glass_${_isStudyPhase}_${_progress.toStringAsFixed(3)}'), // ADDED: Unique key with progress
                   progress: _progress,
                   animation: _waterAnimationController,
                   isStudyPhase: _isStudyPhase,

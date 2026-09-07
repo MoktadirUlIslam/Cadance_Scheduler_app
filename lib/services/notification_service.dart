@@ -1,15 +1,17 @@
-// lib/services/notification_service.dart
-
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
 import '../models/calendar_models.dart';
 
+// ✅ TOP-LEVEL FUNCTION - MUST be outside the class (REQUIRED for Android)
+@pragma('vm:entry-point')
+void onBackgroundNotificationResponse(NotificationResponse response) {
+  print('📲 Background notification tapped: ${response.payload}');
+  // Handle background notification here
+}
+
 class NotificationService {
-  // ✅ Fixed: Proper singleton pattern with null safety
   static NotificationService? _instance;
 
   factory NotificationService() {
@@ -47,11 +49,15 @@ class NotificationService {
         iOS: iosSettings,
       );
 
+      // ✅ CRITICAL FIX: Use top-level function, NOT static method
       await _notifications.initialize(
         settings,
         onDidReceiveNotificationResponse: _onNotificationResponse,
-        onDidReceiveBackgroundNotificationResponse: _onBackgroundNotificationResponse,
+        onDidReceiveBackgroundNotificationResponse: onBackgroundNotificationResponse,
       );
+
+      await _createNotificationChannels();
+      await _requestIosPermissions();
 
       _isInitialized = true;
       print('✅ NotificationService initialized successfully');
@@ -61,15 +67,105 @@ class NotificationService {
     }
   }
 
+  // ==================== CHANNEL CREATION ====================
+
+  Future<void> _createNotificationChannels() async {
+    try {
+      final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+      >();
+
+      if (androidPlugin == null) {
+        print('⚠️ Android plugin not available');
+        return;
+      }
+
+      const taskChannel = AndroidNotificationChannel(
+        'task_channel',
+        'Task Reminders',
+        description: 'Reminders for your tasks',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+        showBadge: true,
+      );
+      await androidPlugin.createNotificationChannel(taskChannel);
+
+      const summaryChannel = AndroidNotificationChannel(
+        'daily_summary_channel',
+        'Daily Summary',
+        description: 'Daily summary of your tasks',
+        importance: Importance.defaultImportance,
+        enableVibration: true,
+        playSound: true,
+        showBadge: true,
+      );
+      await androidPlugin.createNotificationChannel(summaryChannel);
+
+      const overdueChannel = AndroidNotificationChannel(
+        'overdue_channel',
+        'Overdue Reminders',
+        description: 'Reminders for overdue tasks',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+        showBadge: true,
+      );
+      await androidPlugin.createNotificationChannel(overdueChannel);
+
+      const autoCompleteChannel = AndroidNotificationChannel(
+        'autocomplete_channel',
+        'Auto-Complete',
+        description: 'Tasks auto-completed by the system',
+        importance: Importance.defaultImportance,
+        enableVibration: true,
+        playSound: true,
+        showBadge: true,
+      );
+      await androidPlugin.createNotificationChannel(autoCompleteChannel);
+
+      const extensionChannel = AndroidNotificationChannel(
+        'extension_channel',
+        'Deadline Extensions',
+        description: 'Deadline extension notifications',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+        showBadge: true,
+      );
+      await androidPlugin.createNotificationChannel(extensionChannel);
+
+      print('✅ Created all notification channels');
+    } catch (e) {
+      print('❌ Error creating notification channels: $e');
+    }
+  }
+
+  // ==================== IOS PERMISSIONS ====================
+
+  Future<void> _requestIosPermissions() async {
+    try {
+      final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+      >();
+
+      if (iosPlugin != null) {
+        await iosPlugin.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+        print('✅ iOS permissions requested');
+      }
+    } catch (e) {
+      print('⚠️ Error requesting iOS permissions: $e');
+    }
+  }
+
   // ==================== NOTIFICATION RESPONSE HANDLERS ====================
 
   void _onNotificationResponse(NotificationResponse response) {
     print('📲 Notification tapped: ${response.payload}');
-    // Handle navigation based on payload
-  }
-
-  void _onBackgroundNotificationResponse(NotificationResponse response) {
-    print('📲 Background notification tapped: ${response.payload}');
   }
 
   // ==================== PERMISSIONS ====================
@@ -81,7 +177,6 @@ class NotificationService {
           .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
           ?.requestNotificationsPermission();
 
-      // For iOS
       if (permissions == null) {
         final ios = _notifications.resolvePlatformSpecificImplementation<
             IOSFlutterLocalNotificationsPlugin
@@ -111,9 +206,12 @@ class NotificationService {
     required String title,
     required String body,
     required DateTime scheduledTime,
-    required Color color,
+    Color color = Colors.blue,
   }) async {
-    if (!_isInitialized) await initialize();
+    if (!_isInitialized) {
+      await initialize();
+    }
+
     if (scheduledTime.isBefore(DateTime.now())) {
       print('⏭️ Skipping notification scheduled in the past');
       return;
@@ -122,21 +220,28 @@ class NotificationService {
     try {
       final scheduledDate = tz.TZDateTime.from(scheduledTime, tz.local);
 
-      // ✅ FIXED: Color should be Color? not int
+      String channelId = 'task_channel';
+      if (title.contains('Overdue')) {
+        channelId = 'overdue_channel';
+      } else if (title.contains('Auto-Completed')) {
+        channelId = 'autocomplete_channel';
+      } else if (title.contains('Deadline Extended')) {
+        channelId = 'extension_channel';
+      } else if (title.contains('Daily Summary')) {
+        channelId = 'daily_summary_channel';
+      }
+
       final androidDetails = AndroidNotificationDetails(
-        'task_channel',
-        'Task Reminders',
-        channelDescription: 'Reminders for your tasks',
+        channelId,
+        'Notifications',
+        channelDescription: 'Task notifications',
         importance: Importance.high,
         priority: Priority.high,
         icon: '@mipmap/ic_launcher',
-        color: color, // ✅ Fixed: Pass Color directly
+        color: color,
         category: AndroidNotificationCategory.reminder,
         playSound: true,
         enableVibration: true,
-        // ✅ FIXED: Use Int64List for vibration pattern
-        vibrationPattern: Int64List.fromList([0, 250, 250, 250]),
-        timeoutAfter: 60000,
         showWhen: true,
         autoCancel: true,
       );
@@ -145,7 +250,6 @@ class NotificationService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
-        sound: 'default.wav',
         interruptionLevel: InterruptionLevel.timeSensitive,
       );
 
@@ -155,7 +259,7 @@ class NotificationService {
       );
 
       await _notifications.zonedSchedule(
-        notificationId,
+        notificationId.abs(),
         title,
         body,
         scheduledDate,
@@ -165,7 +269,8 @@ class NotificationService {
         matchDateTimeComponents: DateTimeComponents.time,
       );
 
-      print('✅ Scheduled task notification #$notificationId at $scheduledTime');
+      print('✅ Scheduled notification #${notificationId.abs()} at $scheduledTime');
+      print('   Title: $title');
     } catch (e) {
       print('❌ Error scheduling task notification: $e');
     }
@@ -182,7 +287,6 @@ class NotificationService {
     if (!_isInitialized) await initialize();
 
     try {
-      // ✅ FIXED: Color should be Color? not int
       final androidDetails = AndroidNotificationDetails(
         'task_channel',
         'Task Reminders',
@@ -190,12 +294,10 @@ class NotificationService {
         importance: Importance.high,
         priority: Priority.high,
         icon: '@mipmap/ic_launcher',
-        color: color, // ✅ Fixed: Pass Color directly
+        color: color,
         category: AndroidNotificationCategory.reminder,
         playSound: true,
         enableVibration: true,
-        // ✅ FIXED: Use Int64List for vibration pattern
-        vibrationPattern: Int64List.fromList([0, 250, 250, 250]),
         autoCancel: true,
       );
 
@@ -203,7 +305,6 @@ class NotificationService {
         presentAlert: true,
         presentBadge: true,
         presentSound: true,
-        sound: 'default.wav',
         interruptionLevel: InterruptionLevel.timeSensitive,
       );
 
@@ -213,7 +314,7 @@ class NotificationService {
       );
 
       await _notifications.show(
-        notificationId,
+        notificationId.abs(),
         title,
         body,
         details,
@@ -226,171 +327,124 @@ class NotificationService {
     }
   }
 
-  // ==================== SCHEDULE EVENT NOTIFICATION ====================
-
-  Future<void> scheduleEventNotification(CalendarEventModel event) async {
-    if (!_isInitialized) await initialize();
-    if (!event.hasReminder) return;
-
-    final notificationTime = event.notificationTime;
-    if (notificationTime == null) return;
-    if (notificationTime.isBefore(DateTime.now())) {
-      print('⏭️ Skipping event notification in the past');
-      return;
-    }
-
-    try {
-      final scheduledDate = tz.TZDateTime.from(notificationTime, tz.local);
-      final notificationId = event.id.hashCode.abs();
-
-      // Different channel based on event category
-      final channelId = 'event_${event.category.name}';
-      final channelName = '${event.category.label} Events';
-
-      // ✅ FIXED: Color should be Color? not int
-      final androidDetails = AndroidNotificationDetails(
-        channelId,
-        channelName,
-        channelDescription: 'Notifications for ${event.category.label} events',
-        importance: Importance.high,
-        priority: Priority.high,
-        icon: '@mipmap/ic_launcher',
-        color: event.eventColor, // ✅ Fixed: Pass Color directly
-        category: AndroidNotificationCategory.event,
-        playSound: true,
-        enableVibration: true,
-        // ✅ FIXED: Use Int64List for vibration pattern
-        vibrationPattern: Int64List.fromList([0, 250, 250, 250]),
-        autoCancel: true,
-      );
-
-      final iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.timeSensitive,
-      );
-
-      final details = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      // Build notification body
-      final body = _buildEventNotificationBody(event);
-
-      await _notifications.zonedSchedule(
-        notificationId,
-        '📅 ${_getCategoryEmoji(event.category)} ${event.title}',
-        body,
-        scheduledDate,
-        details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-      );
-
-      print('✅ Scheduled notification for "${event.title}" at $notificationTime');
-    } catch (e) {
-      print('❌ Error scheduling event notification: $e');
-    }
-  }
-
-  // ==================== SCHEDULE ALL NOTIFICATIONS ====================
-
-  Future<void> scheduleAllEvents(List<CalendarEventModel> events) async {
-    if (!_isInitialized) await initialize();
-
-    try {
-      // Cancel existing notifications first
-      await cancelAllNotifications();
-
-      int scheduledCount = 0;
-      for (var event in events) {
-        if (event.isUpcoming && event.hasReminder) {
-          await scheduleEventNotification(event);
-          scheduledCount++;
-        }
-      }
-
-      print('✅ Scheduled notifications for $scheduledCount events');
-    } catch (e) {
-      print('❌ Error scheduling all events: $e');
-    }
-  }
-
-  // ==================== DAILY SUMMARY NOTIFICATION ====================
-
-  Future<void> scheduleDailySummary(List<CalendarEventModel> todayEvents) async {
-    if (!_isInitialized) await initialize();
-    if (todayEvents.isEmpty) return;
-
-    final now = DateTime.now();
-    final summaryTime = DateTime(now.year, now.month, now.day, 8, 0); // 8 AM daily summary
-
-    if (now.isAfter(summaryTime)) {
-      print('⏭️ Daily summary time already passed');
-      return;
-    }
-
-    try {
-      final scheduledDate = tz.TZDateTime.from(summaryTime, tz.local);
-
-      // Build summary
-      final buffer = StringBuffer();
-      buffer.writeln('You have ${todayEvents.length} event(s) today:');
-      for (var event in todayEvents) {
-        buffer.writeln('• ${_getCategoryEmoji(event.category)} ${event.title} - ${event.formattedTimeRange}');
-      }
-
-      final androidDetails = AndroidNotificationDetails(
-        'daily_summary_channel',
-        'Daily Summary',
-        channelDescription: 'Daily summary of your events',
-        importance: Importance.defaultImportance,
-        priority: Priority.defaultPriority,
-        icon: '@mipmap/ic_launcher',
-        autoCancel: true,
-      );
-
-      final iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-      );
-
-      final details = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      await _notifications.zonedSchedule(
-        9999, // Fixed ID for daily summary
-        '📋 Today\'s Events',
-        buffer.toString(),
-        scheduledDate,
-        details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-      );
-
-      print('✅ Scheduled daily summary');
-    } catch (e) {
-      print('❌ Error scheduling daily summary: $e');
-    }
-  }
-
   // ==================== CANCEL NOTIFICATIONS ====================
 
   Future<void> cancelNotification(int id) async {
     if (!_isInitialized) await initialize();
-    await _notifications.cancel(id);
-    print('✅ Cancelled notification: $id');
+    await _notifications.cancel(id.abs());
+    print('✅ Cancelled notification: ${id.abs()}');
   }
 
   Future<void> cancelAllNotifications() async {
     if (!_isInitialized) await initialize();
     await _notifications.cancelAll();
     print('✅ Cancelled all notifications');
+  }
+
+  // Add this method to the NotificationService class in notification_service.dart
+
+// ==================== SCHEDULE ALL EVENTS ====================
+
+  Future<void> scheduleAllEvents(List<CalendarEventModel> events) async {
+    if (!_isInitialized) await initialize();
+
+    // Cancel all existing notifications first to avoid duplicates
+    await cancelAllNotifications();
+
+    int notificationId = 1;
+    int scheduledCount = 0;
+    final now = DateTime.now();
+
+    for (var event in events) {
+      // Skip events that are in the past
+      if (event.date.isBefore(now) && !event.isAllDay) {
+        continue;
+      }
+
+      // For all-day events, schedule at 9 AM on the event day
+      DateTime scheduleTime;
+      if (event.isAllDay) {
+        scheduleTime = DateTime(
+          event.date.year,
+          event.date.month,
+          event.date.day,
+          9, 0, 0, // 9:00 AM
+        );
+      } else {
+        // For events with specific time, use the event's date and time
+        // Note: Your CalendarEventModel should have a time property
+        // If not, you'll need to adjust this
+        scheduleTime = event.date;
+      }
+
+      // Skip if scheduled time is in the past
+      if (scheduleTime.isBefore(now)) {
+        continue;
+      }
+
+      final title = '${_getCategoryEmoji(event.category)} ${event.title}';
+      final body = _buildEventNotificationBody(event);
+      final color = event.category.color;
+
+      await scheduleTaskNotification(
+        notificationId: notificationId,
+        title: title,
+        body: body,
+        scheduledTime: scheduleTime,
+        color: color,
+      );
+
+      notificationId++;
+      scheduledCount++;
+    }
+
+    print('✅ Scheduled $scheduledCount events');
+  }
+
+// ==================== SCHEDULE EVENT NOTIFICATION ====================
+
+  Future<void> scheduleEventNotification(CalendarEventModel event) async {
+    if (!_isInitialized) await initialize();
+
+    final now = DateTime.now();
+
+    // Skip if event is in the past
+    if (event.date.isBefore(now) && !event.isAllDay) {
+      return;
+    }
+
+    // For all-day events, schedule at 9 AM on the event day
+    DateTime scheduleTime;
+    if (event.isAllDay) {
+      scheduleTime = DateTime(
+        event.date.year,
+        event.date.month,
+        event.date.day,
+        9, 0, 0,
+      );
+    } else {
+      scheduleTime = event.date;
+    }
+
+    if (scheduleTime.isBefore(now)) {
+      return;
+    }
+
+    final title = '${_getCategoryEmoji(event.category)} ${event.title}';
+    final body = _buildEventNotificationBody(event);
+    final color = event.category.color;
+
+    final notificationId = event.id is int
+        ? event.id as int
+        : DateTime.now().millisecondsSinceEpoch.abs();
+
+    await scheduleTaskNotification(
+      notificationId: notificationId,
+      title: title,
+      body: body,
+      scheduledTime: scheduleTime,
+      color: color,
+    );
   }
 
   // ==================== GET PENDING NOTIFICATIONS ====================
@@ -403,7 +457,7 @@ class NotificationService {
   Future<bool> isNotificationScheduled(int notificationId) async {
     if (!_isInitialized) await initialize();
     final pending = await getPendingNotifications();
-    return pending.any((p) => p.id == notificationId);
+    return pending.any((p) => p.id == notificationId.abs());
   }
 
   // ==================== HELPERS ====================
@@ -429,6 +483,8 @@ class NotificationService {
 
     return buffer.toString();
   }
+
+
 
   String _getCategoryEmoji(EventCategory category) {
     switch (category) {

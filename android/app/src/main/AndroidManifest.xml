@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- ─── NOTIFICATION PERMISSIONS (NEW) ─── -->
+    <!-- ─── NOTIFICATION PERMISSIONS (REQUIRED) ─── -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
@@ -40,12 +40,12 @@
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <!-- ─── NOTIFICATION CHANNELS (NEW) ─── -->
+        <!-- ─── NOTIFICATION CHANNELS ─── -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="task_channel" />
 
-        <!-- ─── NOTIFICATION RECEIVERS (NEW) ─── -->
+        <!-- ─── NOTIFICATION RECEIVERS (REQUIRED) ─── -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
             android:exported="true" />

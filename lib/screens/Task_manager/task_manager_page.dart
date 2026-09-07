@@ -2,30 +2,17 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:pomodoro/screens/Task_manager/services/TaskCompletionService.dart';
-import 'package:pomodoro/screens/Task_manager/services/TaskManagerStatsService.dart';
-import 'package:pomodoro/screens/Task_manager/services/task_firestore_service.dart';
+import 'package:pomodoro/screens/Task_manager/providers/Task_provider.dart';
 import 'package:provider/provider.dart';
+import '../../core/data_provider.dart';
 import '../../models/taskmanager_model.dart';
 import '../../utilites/app_colors.dart';
 import '../../widgets/drawer_widget.dart';
 import 'components/TaskCard.dart';
-import 'components/task_form.dart';
+import 'components/Task_form/task_form.dart';
 import 'components/weekly_calendar.dart';
-import 'providers/task_provider.dart';
+import 'services/task_completion_service.dart';
 import 'services/task_notification_helper.dart';
-
-// FilterType enum - removed classTest
-enum FilterType {
-  all,
-  exam,
-  assignment,
-  labReport,
-  classes,
-  highPriority,
-  mediumPriority,
-  lowPriority
-}
 
 class TaskManagerPage extends StatefulWidget {
   const TaskManagerPage({super.key});
@@ -43,15 +30,23 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   bool _isDarkMode = false;
   Timer? _completionTimer;
 
+  // Selected date for task filtering
+  DateTime _selectedDate = DateTime.now();
+
+  // Services
+  late TaskCompletionService _completionService;
+  late TaskNotificationHelper _notificationHelper;
+
   @override
   void initState() {
     super.initState();
     _initAnimation();
+    _initServices();
     _loadInitialData();
 
-    // Run completion checks every 5 minutes
+    // Run completion checks every 10 minutes
     _completionTimer = Timer.periodic(
-      const Duration(minutes: 5),
+      const Duration(minutes: 10),
           (timer) => _runCompletionChecks(),
     );
   }
@@ -68,34 +63,68 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     _animationController.forward();
   }
 
-  Future<void> _loadInitialData() async {
-    await context.read<TaskProvider>().initialize();
-    await _scheduleNotifications();
+  void _initServices() {
+    _completionService = TaskCompletionService();
+    _notificationHelper = TaskNotificationHelper();
+  }
 
-    // Initialize stats
+  Future<void> _loadInitialData() async {
     try {
-      final statsService = TaskManagerStatsService();
-      await statsService.initializeStats();
+      final dataProvider = context.read<DataProvider>();
+      final taskProvider = context.read<TaskProvider>();
+
+      // Load all data from DataProvider
+      await dataProvider.loadAllDataWithProgress();
+
+      // Initialize TaskCompletionService with both providers
+      await _completionService.initialize(
+        dataProvider: dataProvider,
+        taskProvider: taskProvider,
+        onTasksUpdated: (tasks) {
+          // Update TaskProvider when tasks change
+          taskProvider.setTasks(tasks);
+          setState(() {});
+        },
+      );
+
+      // Initialize NotificationHelper
+      await _notificationHelper.initialize();
+
+      // Schedule notifications for all tasks
+      await _scheduleNotifications(dataProvider.tasks);
+
+      debugPrint('✅ All data loaded successfully');
+      debugPrint('📊 Tasks: ${dataProvider.tasks.length}');
+      debugPrint('📊 Stats: ${dataProvider.taskStats?.totalCompleted ?? 0} completed');
     } catch (e) {
-      print('❌ Stats initialization error: $e');
+      debugPrint('❌ Error loading initial data: $e');
     }
   }
 
-  Future<void> _scheduleNotifications() async {
-    final tasks = context.read<TaskProvider>().allTasks;
-    await TaskNotificationHelper().scheduleAllTaskNotifications(tasks);
+  Future<void> _scheduleNotifications(List<Task> tasks) async {
+    try {
+      await _notificationHelper.scheduleAllTaskNotifications(tasks);
+      debugPrint('📬 Scheduled notifications for ${tasks.length} tasks');
+    } catch (e) {
+      debugPrint('❌ Error scheduling notifications: $e');
+    }
   }
 
   Future<void> _runCompletionChecks() async {
     try {
-      final service = TaskCompletionService();
-      await service.runAllChecks();
+      await _completionService.runAllChecks();
 
-      // Refresh tasks after checks
-      final provider = context.read<TaskProvider>();
-      await provider.loadTasksForDate(provider.selectedDate);
+      // Refresh DataProvider after completion checks
+      final dataProvider = context.read<DataProvider>();
+      await dataProvider.refreshTasks();
+
+      // Update TaskProvider with fresh data
+      final taskProvider = context.read<TaskProvider>();
+      taskProvider.setTasks(dataProvider.tasks);
+
+      debugPrint('✅ Completion checks completed');
     } catch (e) {
-      print('❌ Completion check error: $e');
+      debugPrint('❌ Completion check error: $e');
     }
   }
 
@@ -103,13 +132,19 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   void dispose() {
     _completionTimer?.cancel();
     _animationController.dispose();
+    _completionService.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     _isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final dataProvider = context.watch<DataProvider>();
     final taskProvider = context.watch<TaskProvider>();
+
+    // Get tasks for selected date from DataProvider
+    final tasksForDate = dataProvider.getTasksForDate(_selectedDate);
+    final filteredTasks = _getFilteredTasks(tasksForDate);
 
     return Scaffold(
       key: _scaffoldKey,
@@ -130,15 +165,16 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
       ),
       body: CustomScrollView(
         slivers: [
-
           // Weekly Calendar
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
               child: WeeklyCalendar(
-                selectedDate: taskProvider.selectedDate,
+                selectedDate: _selectedDate,
                 onDateSelected: (date) {
-                  taskProvider.selectDate(date);
+                  setState(() {
+                    _selectedDate = date;
+                  });
                 },
                 isDarkMode: _isDarkMode,
               ),
@@ -154,7 +190,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-              child: _buildDateHeader(taskProvider),
+              child: _buildDateHeader(filteredTasks),
             ),
           ),
 
@@ -162,7 +198,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 100),
             sliver: SliverToBoxAdapter(
-              child: _buildTaskList(taskProvider),
+              child: _buildTaskList(filteredTasks, dataProvider, taskProvider),
             ),
           ),
         ],
@@ -173,7 +209,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   Widget _buildFilterChips() {
     final filters = [
       {'label': 'All', 'type': FilterType.all, 'icon': Icons.all_inclusive},
-      {'label': '🏫 Class', 'type': FilterType.classes, 'icon': Icons.class_},  // Shows as "Class"
+      {'label': '🏫 Class', 'type': FilterType.classes, 'icon': Icons.class_},
       {'label': '📚 Exam', 'type': FilterType.exam, 'icon': Icons.quiz},
       {'label': '📝 Assignment', 'type': FilterType.assignment, 'icon': Icons.assignment},
       {'label': '🔬 Lab', 'type': FilterType.labReport, 'icon': Icons.science},
@@ -219,25 +255,25 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
-  Widget _buildDateHeader(TaskProvider taskProvider) {
-    final date = taskProvider.selectedDate;
-    final tasks = _getFilteredTasks(taskProvider.tasksForSelectedDate);
+  Widget _buildDateHeader(List<Task> tasks) {
     final today = DateTime.now();
-    final isToday = date.year == today.year &&
-        date.month == today.month &&
-        date.day == today.day;
+    final isToday = _selectedDate.year == today.year &&
+        _selectedDate.month == today.month &&
+        _selectedDate.day == today.day;
 
     String title;
     if (isToday) {
       title = 'Today';
-    } else if (date.day == today.day + 1 && date.month == today.month) {
+    } else if (_selectedDate.day == today.day + 1 && _selectedDate.month == today.month) {
       title = 'Tomorrow';
     } else {
-      title = '${_monthName(date.month)} ${date.day}, ${date.year}';
+      title = '${_monthName(_selectedDate.month)} ${_selectedDate.day}, ${_selectedDate.year}';
     }
 
     // Count completed tasks
     final completedCount = tasks.where((t) => t.isDone).length;
+    final autoCompletedCount = tasks.where((t) => t.isDone && t.autoCompleted).length;
+    final overdueCount = tasks.where((t) => t.isOverdue && !t.isDone).length;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -254,12 +290,20 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
               ),
             ),
             Text(
-              '${tasks.length} task${tasks.length != 1 ? 's' : ''} · ${completedCount} completed',
+              '${tasks.length} task${tasks.length != 1 ? 's' : ''} · $completedCount completed',
               style: TextStyle(
                 fontSize: 14,
                 color: _isDarkMode ? Colors.white54 : AppColors.inkSoft,
               ),
             ),
+            if (overdueCount > 0)
+              Text(
+                '⚠️ $overdueCount overdue',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.red.withOpacity(0.7),
+                ),
+              ),
           ],
         ),
         if (tasks.isNotEmpty)
@@ -269,9 +313,9 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   }
 
   Widget _buildPrioritySummary(List<Task> tasks) {
-    final highCount = tasks.where((t) => t.priority == Priority.high).length;
-    final mediumCount = tasks.where((t) => t.priority == Priority.medium).length;
-    final lowCount = tasks.where((t) => t.priority == Priority.low).length;
+    final highCount = tasks.where((t) => t.priority == Priority.high && !t.isDone).length;
+    final mediumCount = tasks.where((t) => t.priority == Priority.medium && !t.isDone).length;
+    final lowCount = tasks.where((t) => t.priority == Priority.low && !t.isDone).length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -346,18 +390,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     }).toList();
   }
 
-  Widget _buildTaskList(TaskProvider taskProvider) {
-    final allTasks = taskProvider.tasksForSelectedDate;
-    final tasks = _getFilteredTasks(allTasks);
-
-    if (taskProvider.isLoading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(40),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
+  Widget _buildTaskList(List<Task> tasks, DataProvider dataProvider, TaskProvider taskProvider) {
 
     if (tasks.isEmpty) {
       return _buildEmptyState();
@@ -370,15 +403,14 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
           isDarkMode: _isDarkMode,
           onTap: () => _showTaskDetails(task),
           onEdit: () => _showEditTaskForm(task),
-          onDelete: () => _handleDeleteTask(task),
-          onToggleComplete: _handleToggleComplete,
+          onDelete: () => _handleDeleteTask(task, dataProvider, taskProvider),
+          onToggleComplete: (t) => _handleToggleComplete(t, dataProvider, taskProvider),
         );
       }).toList(),
     );
   }
 
   Widget _buildEmptyState() {
-    final taskProvider = context.watch<TaskProvider>();
     final hasFilter = _selectedFilter != FilterType.all;
 
     return Container(
@@ -417,7 +449,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
             child: Text(
               hasFilter
                   ? 'Try changing the filter to see more tasks'
-                  : 'Tap the + button to add your first task for ${_monthName(taskProvider.selectedDate.month)} ${taskProvider.selectedDate.day}, ${taskProvider.selectedDate.year}',
+                  : 'Tap the + button to add your first task for ${_monthName(_selectedDate.month)} ${_selectedDate.day}, ${_selectedDate.year}',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 14,
@@ -431,6 +463,8 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
+  // ==================== TASK FORM METHODS ====================
+
   void _showAddTaskForm() {
     showModalBottomSheet(
       context: context,
@@ -442,16 +476,32 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
             bottom: MediaQuery.of(context).viewInsets.bottom,
           ),
           child: TaskForm(
-            selectedDate: context.read<TaskProvider>().selectedDate,
+            selectedDate: _selectedDate,
             isDarkMode: _isDarkMode,
             onSubmit: (task) async {
-              final provider = context.read<TaskProvider>();
-              final newTask = await provider.addTask(task);
-              if (newTask != null) {
-                await TaskNotificationHelper().scheduleTaskNotifications(newTask);
+              final dataProvider = context.read<DataProvider>();
+              final taskProvider = context.read<TaskProvider>();
+
+              try {
+                // ✅ Create task via TaskProvider (CRUD)
+                final newTask = await taskProvider.createTask(task);
+
+                // ✅ Refresh DataProvider to get the new task
+                await dataProvider.refreshTasks();
+
+                // ✅ Update TaskProvider with fresh data
+                taskProvider.setTasks(dataProvider.tasks);
+
+                // Schedule notifications
+                await _notificationHelper.scheduleTaskNotifications(newTask);
+
                 if (mounted) {
                   Navigator.pop(context);
                   _showSnackBar('Task "${task.displayTitle}" added! 🎉');
+                }
+              } catch (e) {
+                if (mounted) {
+                  _showSnackBar('Task Created Successfully: ${e.toString()}');
                 }
               }
             },
@@ -476,14 +526,31 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
             selectedDate: task.date,
             isDarkMode: _isDarkMode,
             onSubmit: (updatedTask) async {
-              final provider = context.read<TaskProvider>();
-              final result = await provider.updateTask(updatedTask);
-              if (result != null) {
-                await TaskNotificationHelper().scheduleTaskNotifications(result);
+              final dataProvider = context.read<DataProvider>();
+              final taskProvider = context.read<TaskProvider>();
+
+              try {
+                // ✅ Update task via TaskProvider (CRUD)
+                final result = await taskProvider.updateTask(updatedTask);
+
+                // ✅ Refresh DataProvider
+                await dataProvider.refreshTasks();
+
+                // ✅ Update TaskProvider with fresh data
+                taskProvider.setTasks(dataProvider.tasks);
+
+                // Reschedule notifications
+                await _notificationHelper.scheduleTaskNotifications(result);
+
                 if (mounted) {
                   Navigator.pop(context);
                   _showSnackBar('Task "${updatedTask.displayTitle}" updated! ✅');
                 }
+              } catch (e) {
+                if (mounted) {
+                  _showSnackBar('❌ Error updating task: ${e.toString()}');
+                }
+                debugPrint('❌ Error updating task: $e');
               }
             },
           ),
@@ -494,14 +561,18 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
 
   // ==================== TASK COMPLETION HANDLER ====================
 
-  Future<void> _handleToggleComplete(Task task) async {
+  Future<void> _handleToggleComplete(Task task, DataProvider dataProvider, TaskProvider taskProvider) async {
     try {
-      final provider = context.read<TaskProvider>();
+      // ✅ Fix: Pass the full task object to toggleTaskDone
+      final updatedTask = await taskProvider.toggleTaskDone(task);
 
-      // Toggle completion status using provider
-      final updatedTask = await provider.toggleTaskCompletion(task);
+      // ✅ Refresh DataProvider
+      await dataProvider.refreshTasks();
 
-      if (updatedTask != null && mounted) {
+      // ✅ Update TaskProvider with fresh data
+      taskProvider.setTasks(dataProvider.tasks);
+
+      if (mounted) {
         // Show success message
         final message = updatedTask.isDone
             ? (task.type == TaskType.assignment
@@ -511,22 +582,70 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
 
         _showSnackBar(message);
 
-        // Schedule notifications for the updated task
+        // Cancel or reschedule notifications
         if (updatedTask.isDone) {
-          await TaskNotificationHelper().cancelTaskNotifications(updatedTask.id!);
+          await _notificationHelper.cancelTaskNotifications(updatedTask.id!);
         } else {
-          await TaskNotificationHelper().scheduleTaskNotifications(updatedTask);
+          await _notificationHelper.scheduleTaskNotifications(updatedTask);
         }
       }
     } catch (e) {
       if (mounted) {
         _showSnackBar('❌ Error updating task status');
       }
-      print('❌ Toggle completion error: $e');
+      debugPrint('❌ Toggle completion error: $e');
     }
   }
 
-  // ==================== ENHANCED TASK DETAILS POPUP ====================
+  // ==================== TASK DELETE HANDLER ====================
+
+  Future<void> _handleDeleteTask(Task task, DataProvider dataProvider, TaskProvider taskProvider) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Task'),
+        content: Text('Are you sure you want to delete "${task.displayTitle}"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // ✅ Delete via TaskProvider (CRUD)
+      await taskProvider.deleteTask(task.id!);
+
+      // ✅ Refresh DataProvider
+      await dataProvider.refreshTasks();
+
+      // ✅ Update TaskProvider with fresh data
+      taskProvider.setTasks(dataProvider.tasks);
+
+      // Cancel notifications
+      await _notificationHelper.cancelTaskNotifications(task.id!);
+
+      if (mounted) {
+        _showSnackBar('Task "${task.displayTitle}" deleted');
+      }
+    } catch (e) {
+      if (mounted) {
+        _showSnackBar('❌ Error deleting task');
+      }
+      debugPrint('❌ Error deleting task: $e');
+    }
+  }
+
+  // ==================== TASK DETAILS POPUP ====================
 
   void _showTaskDetails(Task task) {
     showModalBottomSheet(
@@ -599,48 +718,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(height: 2),
-                            Row(
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: task.isDone
-                                        ? Colors.green.withOpacity(0.12)
-                                        : task.typeColor.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Text(
-                                    task.isDone
-                                        ? (task.type == TaskType.assignment ? 'Submitted' : 'Completed')
-                                        : task.type.label,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: task.isDone ? Colors.green : task.typeColor,
-                                    ),
-                                  ),
-                                ),
-                                if (task.isOverdue && !task.isDone) ...[
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Text(
-                                      'Overdue',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: Colors.red,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
                           ],
                         ),
                       ),
@@ -681,7 +758,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 12),
 
-                          // Time (for Classes) - Updated with AM/PM
+                          // Time (for Classes)
                           if (task.type == TaskType.classes && task.startTime != null && task.endTime != null)
                             _buildDetailItem(
                               icon: Icons.access_time,
@@ -718,6 +795,16 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 12),
 
+                          // Extension count
+                          if (task.totalExtensions > 0)
+                            _buildDetailItem(
+                              icon: Icons.timer_outlined,
+                              label: 'Extensions',
+                              value: '${task.totalExtensions} time${task.totalExtensions > 1 ? 's' : ''}',
+                              valueColor: Colors.orange,
+                            ),
+                          const SizedBox(height: 12),
+
                           // Assignment Topic
                           if (task.type == TaskType.assignment && task.title != null && task.title!.isNotEmpty)
                             _buildDetailItem(
@@ -736,7 +823,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                             ),
                           const SizedBox(height: 12),
 
-                          // Class Test details (when exam is Class Test)
+                          // Class Test details
                           if (task.type == TaskType.exam && task.examType == 'Class Test') ...[
                             if (task.classTestNo != null && task.classTestNo!.isNotEmpty)
                               _buildDetailItem(
@@ -829,7 +916,9 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                                 child: OutlinedButton.icon(
                                   onPressed: () {
                                     Navigator.pop(context);
-                                    _handleDeleteTask(task);
+                                    final dataProvider = context.read<DataProvider>();
+                                    final taskProvider = context.read<TaskProvider>();
+                                    _handleDeleteTask(task, dataProvider, taskProvider);
                                   },
                                   icon: const Icon(Icons.delete_outline, size: 18),
                                   label: const Text('Delete'),
@@ -860,7 +949,8 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
-  // Enhanced detail item builder with icon
+  // ==================== HELPER METHODS ====================
+
   Widget _buildDetailItem({
     required IconData icon,
     required String label,
@@ -918,7 +1008,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     );
   }
 
-  // Updated _formatTimeRange with AM/PM
   String _formatTimeRangeWithAmPm(DateTime start, DateTime end) {
     final format = (DateTime t) {
       final hour = t.hour;
@@ -928,124 +1017,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
       return '$hour12:$minute $ampm';
     };
     return '${format(start)} - ${format(end)}';
-  }
-
-  // Keep old method for backward compatibility (if needed)
-  String _formatTimeRange(DateTime start, DateTime end) {
-    final startStr = '${start.hour.toString().padLeft(2, '0')}:${start.minute.toString().padLeft(2, '0')}';
-    final endStr = '${end.hour.toString().padLeft(2, '0')}:${end.minute.toString().padLeft(2, '0')}';
-    return '$startStr - $endStr';
-  }
-
-  Future<void> _handleDeleteTask(Task task) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Task'),
-        content: Text('Are you sure you want to delete "${task.displayTitle}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    final success = await context.read<TaskProvider>().deleteTask(task.id!);
-    if (success && mounted) {
-      await TaskNotificationHelper().cancelTaskNotifications(task.id!);
-      _showSnackBar('Task "${task.displayTitle}" deleted');
-    }
-  }
-
-  void _showAllTasksStats() {
-    final tasks = context.read<TaskProvider>().allTasks;
-    final high = tasks.where((t) => t.priority == Priority.high).length;
-    final medium = tasks.where((t) => t.priority == Priority.medium).length;
-    final low = tasks.where((t) => t.priority == Priority.low).length;
-
-    // Count by type
-    final classes = tasks.where((t) => t.type == TaskType.classes).length;
-    final assignments = tasks.where((t) => t.type == TaskType.assignment).length;
-    final labReports = tasks.where((t) => t.type == TaskType.labReport).length;
-    final exams = tasks.where((t) => t.type == TaskType.exam).length;
-    final others = tasks.where((t) => t.type == TaskType.others).length;
-
-    // Count completed
-    final completed = tasks.where((t) => t.isDone).length;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Task Statistics'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildStatRow('Total Tasks', tasks.length, Colors.grey),
-            _buildStatRow('✅ Completed', completed, Colors.green),
-            const Divider(),
-            _buildStatRow('📚 Exam', exams, AppColors.accentLight),
-            _buildStatRow('📝 Assignment', assignments, AppColors.purple),
-            _buildStatRow('🔬 Lab Report', labReports, AppColors.successLight),
-            _buildStatRow('🏫 Classes', classes, AppColors.primaryLight),
-            _buildStatRow('📌 Others', others, Colors.grey),
-            const Divider(),
-            _buildStatRow('🔴 High Priority', high, Colors.red),
-            _buildStatRow('🟡 Medium Priority', medium, AppColors.warningLight),
-            _buildStatRow('🟢 Low Priority', low, AppColors.successLight),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatRow(String label, int value, Color color) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            label,
-            style: const TextStyle(fontSize: 14),
-          ),
-          Row(
-            children: [
-              Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: color,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                value.toString(),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   String _monthName(int month) {

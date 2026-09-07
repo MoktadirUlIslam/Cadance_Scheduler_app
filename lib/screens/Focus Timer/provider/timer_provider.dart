@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../../../models/timer_stats_model.dart';
 import '../../../services/firebase_service.dart';
+import 'dart:async';
 
 class TimerProvider extends ChangeNotifier {
   final FirebaseService _firebaseService = FirebaseService();
@@ -10,20 +11,44 @@ class TimerProvider extends ChangeNotifier {
   TimerStatsModel? _stats;
   bool _isLoading = false;
   String? _error;
+  bool _isInitialized = false;
+
+  // Cache for today's stats to reduce Firebase calls
+  DailyStats? _cachedTodayStats;
+  DateTime? _cacheDate;
 
   // Getters
   TimerStatsModel? get stats => _stats;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  bool get isInitialized => _isInitialized;
+
   int get streak => _stats?.streak ?? 0;
   int get grandTotalFocusMinutes => _stats?.grandTotalFocusMinutes ?? 0;
   int get grandTotalTaskCount => _stats?.grandTotalTaskCount ?? 0;
   List<DailyStats> get history => _stats?.history ?? [];
 
+  // Today's stats with caching
+  int get todayFocusMinutes {
+    if (_cachedTodayStats != null && _cacheDate != null && _isSameDay(_cacheDate!, DateTime.now())) {
+      return _cachedTodayStats!.totalFocusMinutes;
+    }
+    return 0;
+  }
+
+  int get todayTaskCount {
+    if (_cachedTodayStats != null && _cacheDate != null && _isSameDay(_cacheDate!, DateTime.now())) {
+      return _cachedTodayStats!.totalTaskCount;
+    }
+    return 0;
+  }
+
   // ─── INITIALIZATION ───
 
   Future<void> initialize() async {
+    if (_isInitialized) return;
     await loadStats();
+    _isInitialized = true;
   }
 
   Future<void> loadStats() async {
@@ -32,10 +57,28 @@ class TimerProvider extends ChangeNotifier {
 
     try {
       _stats = await _firebaseService.getTimerStats();
+      _cacheTodayStats();
     } catch (e) {
       _error = e.toString();
+      print('❌ Error loading stats: $e');
     } finally {
       _setLoading(false);
+    }
+  }
+
+  Future<void> refreshStats() async {
+    await loadStats();
+  }
+
+  // ─── CACHE MANAGEMENT ───
+
+  void _cacheTodayStats() {
+    if (_stats != null) {
+      final now = DateTime.now();
+      _cachedTodayStats = _stats!.history
+          .where((s) => _isSameDay(s.date, now))
+          .firstOrNull;
+      _cacheDate = now;
     }
   }
 
@@ -46,6 +89,11 @@ class TimerProvider extends ChangeNotifier {
     required int taskCount,
     required String taskTitle,
   }) async {
+    if (focusMinutes <= 0) {
+      print('⚠️ Cannot record session with 0 minutes');
+      return;
+    }
+
     _setLoading(true);
     _error = null;
 
@@ -61,8 +109,12 @@ class TimerProvider extends ChangeNotifier {
 
       await _firebaseService.saveTimerStats(updatedStats);
       _stats = updatedStats;
+      _cacheTodayStats();
+
+      print('✅ Session recorded: ${focusMinutes}min - $taskTitle');
     } catch (e) {
       _error = e.toString();
+      print('❌ Error recording session: $e');
       rethrow;
     } finally {
       _setLoading(false);
@@ -73,14 +125,24 @@ class TimerProvider extends ChangeNotifier {
     try {
       await _firebaseService.initializeTimerStats();
       await loadStats();
+      _isInitialized = true;
+      print('✅ Timer stats initialized');
     } catch (e) {
       _error = e.toString();
+      print('❌ Error initializing stats: $e');
       rethrow;
     }
   }
 
   Future<DailyStats?> getDailyStats(DateTime date) async {
     try {
+      // Check cache first
+      if (_cachedTodayStats != null &&
+          _cacheDate != null &&
+          _isSameDay(_cacheDate!, date)) {
+        return _cachedTodayStats;
+      }
+
       if (_stats == null) await loadStats();
       return _stats?.history
           .where((s) => _isSameDay(s.date, date))
@@ -101,6 +163,30 @@ class TimerProvider extends ChangeNotifier {
     return getDailyStats(DateTime.now());
   }
 
+  // ─── WEEKLY STATS ───
+
+  int getWeekFocusMinutes() {
+    if (_stats == null) return 0;
+    final now = DateTime.now();
+    final weekStart = now.subtract(Duration(days: now.weekday - 1));
+    final weekEnd = weekStart.add(const Duration(days: 7));
+
+    return _stats!.history
+        .where((s) => s.date.isAfter(weekStart) && s.date.isBefore(weekEnd))
+        .fold(0, (sum, s) => sum + s.totalFocusMinutes);
+  }
+
+  int getMonthFocusMinutes() {
+    if (_stats == null) return 0;
+    final now = DateTime.now();
+    final monthStart = DateTime(now.year, now.month, 1);
+    final monthEnd = DateTime(now.year, now.month + 1, 1);
+
+    return _stats!.history
+        .where((s) => s.date.isAfter(monthStart) && s.date.isBefore(monthEnd))
+        .fold(0, (sum, s) => sum + s.totalFocusMinutes);
+  }
+
   // ─── STATS CALCULATION LOGIC ───
 
   TimerStatsModel _calculateUpdatedStats({
@@ -114,12 +200,29 @@ class TimerProvider extends ChangeNotifier {
 
     List<DailyStats> updatedHistory = List.from(currentStats.history);
 
-    updatedHistory.add(DailyStats(
-      date: now,
-      totalFocusMinutes: focusMinutes,
-      totalTaskCount: taskCount,
-      taskTitle: taskTitle,
-    ));
+    // Check if we already have stats for today
+    final existingTodayIndex = updatedHistory.indexWhere(
+            (s) => _isSameDay(s.date, now)
+    );
+
+    if (existingTodayIndex != -1) {
+      // Update existing today's stats
+      final existing = updatedHistory[existingTodayIndex];
+      updatedHistory[existingTodayIndex] = DailyStats(
+        date: now,
+        totalFocusMinutes: existing.totalFocusMinutes + focusMinutes,
+        totalTaskCount: existing.totalTaskCount + taskCount,
+        taskTitle: existing.taskTitle,
+      );
+    } else {
+      // Add new entry for today
+      updatedHistory.add(DailyStats(
+        date: now,
+        totalFocusMinutes: focusMinutes,
+        totalTaskCount: taskCount,
+        taskTitle: taskTitle,
+      ));
+    }
 
     final newStreak = _calculateStreak(
       currentStats: currentStats,
@@ -143,31 +246,26 @@ class TimerProvider extends ChangeNotifier {
   }) {
     if (history.isEmpty) return 1;
 
-    final currentCycle = _calculateCurrentCycle(appStartTime);
+    // Sort history by date
+    final sortedHistory = List<DailyStats>.from(history)
+      ..sort((a, b) => a.date.compareTo(b.date));
 
-    final currentCycleStart = appStartTime.add(Duration(hours: 24 * currentCycle));
-    final currentCycleEnd = appStartTime.add(Duration(hours: 24 * (currentCycle + 1)));
+    // Calculate consecutive days with activity
+    int streak = 0;
+    DateTime checkDate = DateTime.now();
 
-    bool hasCurrentCycleActivity = _hasActivityInCycle(history, currentCycleStart, currentCycleEnd);
-
-    if (hasCurrentCycleActivity && currentStats.streak > 0) {
-      return currentStats.streak;
-    }
-
-    final previousCycleStart = appStartTime.add(Duration(hours: 24 * (currentCycle - 1)));
-    final previousCycleEnd = appStartTime.add(Duration(hours: 24 * currentCycle));
-
-    bool hasPreviousCycleActivity = _hasActivityInCycle(history, previousCycleStart, previousCycleEnd);
-
-    if (hasPreviousCycleActivity) {
-      if (!hasCurrentCycleActivity) {
-        return currentStats.streak + 1;
+    // Check from today backwards
+    while (true) {
+      final dayStats = sortedHistory.where((s) => _isSameDay(s.date, checkDate)).firstOrNull;
+      if (dayStats != null && dayStats.totalFocusMinutes > 0) {
+        streak++;
+        checkDate = checkDate.subtract(const Duration(days: 1));
       } else {
-        return currentStats.streak;
+        break;
       }
-    } else {
-      return 1;
     }
+
+    return streak > 0 ? streak : 1;
   }
 
   int _calculateCurrentCycle(DateTime appStartTime) {
@@ -218,6 +316,19 @@ class TimerProvider extends ChangeNotifier {
     _stats = null;
     _isLoading = false;
     _error = null;
+    _isInitialized = false;
+    _cachedTodayStats = null;
+    _cacheDate = null;
     notifyListeners();
+  }
+
+  // ─── DISPOSE ───
+
+  @override
+  void dispose() {
+    _stats = null;
+    _cachedTodayStats = null;
+    _cacheDate = null;
+    super.dispose();
   }
 }

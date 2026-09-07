@@ -1,5 +1,7 @@
 // lib/screens/Focus_Timer/pomodoro_page.dart
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:pomodoro/screens/Focus%20Timer/provider/timer_provider.dart';
@@ -11,6 +13,7 @@ import 'package:pomodoro/services/firebase_service.dart';
 import 'package:pomodoro/utilites/app_colors.dart';
 import 'package:pomodoro/widgets/PopupForm.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/data_provider.dart';
 import '../Focus Timer/components/timer_card.dart';
 
@@ -31,6 +34,8 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
   bool _allSessionsComplete = false;
   bool _isForcedReturnActive = false;
   bool _isDisposed = false;
+  bool _isFullLockActive = false;
+  bool _isInitialized = false;
 
   final FirebaseService _firebaseService = FirebaseService();
 
@@ -41,6 +46,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
     _setupChannels();
     _initializeServices();
     _syncNotificationState();
+    _restoreState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !_isDisposed) {
@@ -53,11 +59,62 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
   void dispose() {
     _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
+    _saveState();
     if (_focusMode && _isRunning && !_isBreakPhase) {
-      PhoneLockService.disableLock();
+      PhoneLockService.disableFullLock();
     }
     ForcedReturnService.reset();
     super.dispose();
+  }
+
+  // ─── STATE PERSISTENCE ───
+  Future<void> _saveState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('pomodoro_state', jsonEncode({
+        'studyMin': _studyMin,
+        'breakMin': _breakMin,
+        'totalSessions': _totalSessions,
+        'selectedTimer': _selectedTimer,
+        'focusWork': _focusWork,
+        'timerColor': _timerColor.value,
+        'notifEnabled': _notifEnabled,
+        'hasFocus': _hasFocus,
+        'focusMode': _focusMode,
+        'isRunning': _isRunning,
+        'isBreakPhase': _isBreakPhase,
+        'allSessionsComplete': _allSessionsComplete,
+      }));
+    } catch (e) {
+      print('Error saving state: $e');
+    }
+  }
+
+  Future<void> _restoreState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stateString = prefs.getString('pomodoro_state');
+      if (stateString != null) {
+        final state = jsonDecode(stateString) as Map<String, dynamic>;
+        setState(() {
+          _studyMin = state['studyMin'] ?? 25;
+          _breakMin = state['breakMin'] ?? 5;
+          _totalSessions = state['totalSessions'] ?? 4;
+          _selectedTimer = state['selectedTimer'] ?? '25/5 Micro';
+          _focusWork = state['focusWork'] ?? 'Focus Session';
+          _timerColor = Color(state['timerColor'] ?? Colors.green.value);
+          _notifEnabled = state['notifEnabled'] ?? true;
+          _hasFocus = state['hasFocus'] ?? false;
+          _focusMode = state['focusMode'] ?? false;
+          _isRunning = state['isRunning'] ?? false;
+          _isBreakPhase = state['isBreakPhase'] ?? false;
+          _allSessionsComplete = state['allSessionsComplete'] ?? false;
+        });
+        _syncNotificationState();
+      }
+    } catch (e) {
+      print('Error restoring state: $e');
+    }
   }
 
   // ─── LOAD STATS ───
@@ -71,6 +128,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
   void _initializeServices() {
     ForcedReturnService.initialize();
     ForcedReturnService.setOnUserReturned(_handleUserReturned);
+    PhoneLockService.initialize();
   }
 
   void _syncNotificationState() {
@@ -82,6 +140,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
       if (call.method == 'appWillResignActive' && mounted && !_isDisposed) {
         _warnLock();
       }
+      return null;
     });
   }
 
@@ -94,20 +153,22 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
       _isForcedReturnActive = false;
     });
     if (_isBreakPhase && _isRunning && _focusMode) {
-      _enableLockIfNeeded();
+      _enableFullLockIfNeeded();
     }
   }
 
   // ─── LOCK MANAGEMENT ───
-  void _enableLockIfNeeded() {
+  void _enableFullLockIfNeeded() {
     if (_focusMode && _isRunning && !_isBreakPhase && !_allSessionsComplete) {
-      PhoneLockService.enableLock();
+      PhoneLockService.enableFullLock();
+      _isFullLockActive = true;
     }
   }
 
-  void _disableLockIfNeeded() {
+  void _disableFullLockIfNeeded() {
     if (_focusMode) {
-      PhoneLockService.disableLock();
+      PhoneLockService.disableFullLock();
+      _isFullLockActive = false;
     }
   }
 
@@ -119,8 +180,10 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
     if (state == AppLifecycleState.resumed) {
       ForcedReturnService.setAppInForeground(true);
       _loadStats();
+      _saveState();
     } else if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       ForcedReturnService.setAppInForeground(false);
+      _saveState();
     }
 
     if (!_focusMode || !_isRunning || _isBreakPhase || _allSessionsComplete) return;
@@ -129,10 +192,12 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
         state == AppLifecycleState.inactive ||
         state == AppLifecycleState.detached) {
       _warnLock();
-      PhoneLockService.enableLock();
+      PhoneLockService.enableFullLock();
+      _isFullLockActive = true;
     } else if (state == AppLifecycleState.resumed) {
       _checkBreakStatusOnResume();
-      PhoneLockService.enableLock();
+      PhoneLockService.enableFullLock();
+      _isFullLockActive = true;
     }
   }
 
@@ -201,10 +266,12 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
       _isBreakPhase = false;
       _allSessionsComplete = false;
       _isForcedReturnActive = false;
+      _isFullLockActive = false;
     });
     _syncNotificationState();
     ForcedReturnService.reset();
-    PhoneLockService.disableLock();
+    PhoneLockService.disableFullLock();
+    _saveState();
   }
 
   // ─── TIMER CALLBACKS ───
@@ -216,18 +283,22 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
       _isForcedReturnActive = false;
     });
     if (_focusMode && !_isBreakPhase) {
-      PhoneLockService.enableLock();
+      PhoneLockService.enableFullLock();
+      _isFullLockActive = true;
     }
+    _saveState();
   }
 
   void _onStop() {
     if (_isDisposed || !mounted) return;
     setState(() => _isRunning = false);
     if (_focusMode) {
-      PhoneLockService.disableLock();
+      PhoneLockService.disableFullLock();
+      _isFullLockActive = false;
       ForcedReturnService.dismissForcedReturn();
       _isForcedReturnActive = false;
     }
+    _saveState();
   }
 
   void _onPhaseChange(bool isBreakPhase) {
@@ -240,12 +311,15 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
 
     if (_focusMode && _isRunning) {
       if (isBreakPhase) {
-        PhoneLockService.disableLock();
+        PhoneLockService.disableFullLock();
+        _isFullLockActive = false;
         ForcedReturnService.dismissForcedReturn();
       } else {
-        PhoneLockService.enableLock();
+        PhoneLockService.enableFullLock();
+        _isFullLockActive = true;
       }
     }
+    _saveState();
   }
 
   void _onComplete() {
@@ -256,10 +330,12 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
       _isBreakPhase = false;
       _allSessionsComplete = true;
       _isForcedReturnActive = false;
+      _isFullLockActive = false;
     });
-    PhoneLockService.disableLock();
+    PhoneLockService.disableFullLock();
     ForcedReturnService.dismissForcedReturn();
     _saveTimerStats();
+    _saveState();
 
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted && !_isDisposed) {
@@ -338,20 +414,23 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
 
     return Consumer<DataProvider>(
       builder: (context, dataProvider, child) {
-        return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF0A1A15) : AppColors.bg,
-          body: PopScope(
-            canPop: !locked,
-            onPopInvokedWithResult: (didPop, _) {
-              if (!didPop && locked && mounted && !_isDisposed) {
-                _warnLock();
-                PhoneLockService.enableLock();
-              }
-            },
-            child: SafeArea(
+        return WillPopScope(
+          onWillPop: () async {
+            if (locked) {
+              _warnLock();
+              PhoneLockService.enableFullLock();
+              return false;
+            }
+            return true;
+          },
+          child: Scaffold(
+            backgroundColor: isDark ? const Color(0xFF0A1A15) : AppColors.bg,
+            body: SafeArea(
               child: Stack(
                 children: [
+                  // Main content - No AbsorbPointer or GestureDetector wrapping
                   CustomScrollView(
+                    key: const ValueKey('pomodoro_scroll_view'),
                     physics: locked
                         ? const NeverScrollableScrollPhysics()
                         : const AlwaysScrollableScrollPhysics(),
@@ -374,11 +453,13 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
                       ),
                       const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-                      // Timer Card
+                      // Timer Card - WRAPPED CALLBACKS
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: TimerCard(
+                            // Use a simple key or null
+                            key: _hasFocus ? const ValueKey('timer_card') : null,
                             studyMinutes: _studyMin,
                             breakMinutes: _breakMin,
                             selectedTimer: _selectedTimer,
@@ -388,11 +469,41 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
                             isFocusModeLocked: _focusMode,
                             isAllSessionsComplete: _allSessionsComplete,
                             notificationsEnabled: _notifEnabled,
-                            onTimerStarted: _onStart,
-                            onTimerStopped: _onStop,
-                            onAllSessionsComplete: _onComplete,
-                            onPhaseChange: _onPhaseChange,
-                            onResetAfterComplete: _resetAfterComplete,
+                            onTimerStarted: () {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isDisposed) {
+                                  _onStart();
+                                }
+                              });
+                            },
+                            onTimerStopped: () {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isDisposed) {
+                                  _onStop();
+                                }
+                              });
+                            },
+                            onAllSessionsComplete: () {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isDisposed) {
+                                  _onComplete();
+                                }
+                              });
+                            },
+                            onPhaseChange: (isBreakPhase) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isDisposed) {
+                                  _onPhaseChange(isBreakPhase);
+                                }
+                              });
+                            },
+                            onResetAfterComplete: () {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (mounted && !_isDisposed) {
+                                  _resetAfterComplete();
+                                }
+                              });
+                            },
                           ),
                         ),
                       ),
@@ -411,60 +522,70 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
                     ],
                   ),
 
-                  // Radial Menu Button
+                  // Full screen lock overlay - This blocks all interactions when locked
+                  if (locked)
+                    Positioned.fill(
+                      child: GestureDetector(
+                        onTap: () {
+                          _warnLock();
+                          PhoneLockService.enableFullLock();
+                        },
+                        child: Container(
+                          color: Colors.transparent,
+                          child: Center(
+                            child: Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: isDark ? Colors.grey.shade800 : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 20,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.lock_outline, size: 48, color: _timerColor),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    '🔒 Focus Mode Active',
+                                    style: TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? Colors.white : Colors.black87,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Phone is locked for this session',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: isDark ? Colors.white70 : Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+
+                  // Radial Menu Button - Only show when not locked
                   if (!locked && !_allSessionsComplete)
                     Positioned(
                       bottom: 120,
                       right: 26,
                       child: RadialMenuButton(
+                        key: const ValueKey('radial_menu_button'),
                         isDarkMode: isDark,
                         onTimerSelected: _onTimerSelected,
                         selectedTimer: _selectedTimer,
-                      ),
-                    ),
-
-                  // Loading indicator
-                  if (dataProvider.isLoading)
-                    Positioned(
-                      bottom: 100,
-                      left: 0,
-                      right: 0,
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark ? Colors.grey.shade800 : Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.1),
-                                blurRadius: 10,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              ),
-                              const SizedBox(width: 12),
-                              Text(
-                                'Loading stats...',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark ? Colors.white70 : Colors.black54,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                        isLocked: locked,
                       ),
                     ),
                 ],
@@ -539,7 +660,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
               Icon(Icons.warning_amber_rounded, size: 14, color: Colors.red.shade400),
               const SizedBox(width: 6),
               Text(
-                'Phone Locked - No Exit',
+                '🔒 Phone Locked - No Exit',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.red.shade400),
               ),
             ],
@@ -593,7 +714,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
               Icon(Icons.coffee, size: 14, color: Colors.orange.shade400),
               const SizedBox(width: 6),
               Text(
-                'Break Time - Phone Unlocked',
+                '☕ Break Time - Phone Unlocked',
                 style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade400),
               ),
             ],
@@ -678,6 +799,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
     final tasksDisplay = totalTasks > 0 ? '$totalTasks' : '0';
 
     return Container(
+      key: ValueKey('stats_${todayMinutes}_$streak'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1D2E27) : AppColors.card,
@@ -724,6 +846,10 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
   // ─── TIMER SETUP ───
   void _onTimerSelected(String label, int study, int break_, Color color) {
     if (_isDisposed || !mounted) return;
+    if (_focusMode && _isRunning) {
+      _showFocusModeError();
+      return;
+    }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final dialogState = _DialogState(
@@ -734,6 +860,7 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
 
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlg) => UniversalPopupForm(
           title: 'Focus Session',
@@ -770,10 +897,31 @@ class _PomodoroPageState extends State<PomodoroPage> with WidgetsBindingObserver
               _hasFocus = true;
               _allSessionsComplete = false;
               _isForcedReturnActive = false;
+              _isFullLockActive = false;
             });
             _syncNotificationState();
+            _saveState();
           },
         ),
+      ),
+    );
+  }
+
+  void _showFocusModeError() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.lock, color: Colors.white, size: 18),
+            const SizedBox(width: 8),
+            const Text('Cannot change timer while focus mode is active'),
+          ],
+        ),
+        backgroundColor: Colors.red.shade600,
+        duration: const Duration(seconds: 3),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
     );
   }

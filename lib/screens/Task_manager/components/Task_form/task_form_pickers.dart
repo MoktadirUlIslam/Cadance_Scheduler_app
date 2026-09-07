@@ -3,79 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../../models/taskmanager_model.dart';
 import '../../../../utilites/app_colors.dart';
-
-// ==================== SIMPLE TIME PICKER WIDGET ====================
-class SimpleTimePickerWidget extends StatelessWidget {
-  final TimeOfDay initialTime;
-  final Function(TimeOfDay) onTimeSelected;
-
-  const SimpleTimePickerWidget({
-    super.key,
-    required this.initialTime,
-    required this.onTimeSelected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-
-    return GestureDetector(
-      onTap: () async {
-        final picked = await showTimePicker(
-          context: context,
-          initialTime: initialTime,
-          builder: (context, child) => Theme(
-            data: Theme.of(context).copyWith(
-              colorScheme: ColorScheme.light(
-                primary: AppColors.primaryLight,
-                onPrimary: Colors.white,
-                surface: Colors.white,
-              ),
-            ),
-            child: child!,
-          ),
-        );
-        if (picked != null) {
-          onTimeSelected(picked);
-        }
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: isDarkMode ? AppColors.darkSurface : Colors.grey.shade50,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: isDarkMode ? Colors.white.withOpacity(0.1) : Colors.grey.shade200,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.access_time, color: AppColors.primaryLight, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                _formatTimeOfDay(initialTime),
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                  color: isDarkMode ? Colors.white : AppColors.ink,
-                ),
-              ),
-            ),
-            Icon(Icons.arrow_drop_down, color: isDarkMode ? Colors.white54 : AppColors.inkSoft),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatTimeOfDay(TimeOfDay time) {
-    final hour = time.hourOfPeriod;
-    final minute = time.minute.toString().padLeft(2, '0');
-    final ampm = time.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$hour:$minute $ampm';
-  }
-}
+import '../../../../widgets/time_picker_widget.dart';
 
 // ==================== DATE PICKER ====================
 class DatePicker extends StatelessWidget {
@@ -604,7 +532,7 @@ class DeadlinePicker extends StatelessWidget {
   }
 }
 
-// ==================== DEADLINE WITH TIME PICKER ====================
+/// ==================== DEADLINE WITH TIME PICKER ====================
 class DeadlineWithTimePicker extends StatelessWidget {
   final DateTime? deadline;
   final TimeOfDay? submissionTime;
@@ -632,7 +560,7 @@ class DeadlineWithTimePicker extends StatelessWidget {
           children: [
             Expanded(
               flex: 1,
-              child: _buildSimpleDatePicker(context),
+              child: _buildSimpleDatePicker(context), // <-- Pass context here
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -684,11 +612,11 @@ class DeadlineWithTimePicker extends StatelessWidget {
     );
   }
 
-  Widget _buildSimpleDatePicker(BuildContext context) {
+  Widget _buildSimpleDatePicker(BuildContext context) { // <-- Add context parameter
     return GestureDetector(
       onTap: () async {
         final picked = await showDatePicker(
-          context: context,
+          context: context, // <-- Now context is available
           initialDate: deadline ?? DateTime.now().add(const Duration(days: 7)),
           firstDate: DateTime.now(),
           lastDate: DateTime(2030),

@@ -26,7 +26,13 @@ import android.graphics.PixelFormat
 import android.os.PowerManager
 import android.view.KeyEvent
 import android.media.AudioAttributes
-import android.os.VibrationEffect  // Added import
+import android.os.VibrationEffect
+import android.view.Window
+import android.view.WindowManager.LayoutParams
+import android.os.Bundle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 
 class MainActivity : FlutterActivity() {
     private val PHONE_LOCK_CHANNEL = "phone_lock"
@@ -44,6 +50,20 @@ class MainActivity : FlutterActivity() {
     private var isReturningFromOverlay = false
     private var isOverlayDismissed = false
     private var alarmStarted = false
+    private var isFullLockActive = false
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // Initialize wake lock
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = powerManager.newWakeLock(
+            PowerManager.FULL_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                    PowerManager.ON_AFTER_RELEASE,
+            "Pomodoro::WakeLock"
+        )
+    }
 
     override fun onResume() {
         super.onResume()
@@ -52,6 +72,20 @@ class MainActivity : FlutterActivity() {
         if (isOverlayShowing) {
             dismissOverlay()
             notifyFlutterUserReturned()
+        }
+
+        // Re-enable full lock if active
+        if (isFullLockActive) {
+            enableFullLock()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Keep lock active if in focus mode
+        if (isFullLockActive) {
+            // Don't release lock on pause
+            Log.d("PhoneLock", "🔒 Lock maintained during pause")
         }
     }
 
@@ -72,6 +106,38 @@ class MainActivity : FlutterActivity() {
                     }
                     "isLocked" -> {
                         result.success(isLockTaskModeEnabled())
+                    }
+                    "enableFullLock" -> {
+                        enableFullLock()
+                        result.success(true)
+                    }
+                    "disableFullLock" -> {
+                        disableFullLock()
+                        result.success(true)
+                    }
+                    "enableFullScreenLock" -> {
+                        enableFullScreenLock()
+                        result.success(true)
+                    }
+                    "disableFullScreenLock" -> {
+                        disableFullScreenLock()
+                        result.success(true)
+                    }
+                    "preventPowerOff" -> {
+                        val prevent = call.argument<Boolean>("prevent") ?: true
+                        preventPowerOff(prevent)
+                        result.success(true)
+                    }
+                    "isPowerOffPrevented" -> {
+                        result.success(isPowerOffPrevented())
+                    }
+                    "isFullLockActive" -> {
+                        result.success(isFullLockActive)
+                    }
+                    "setFullLockState" -> {
+                        val active = call.argument<Boolean>("active") ?: false
+                        isFullLockActive = active
+                        result.success(true)
                     }
                     else -> result.notImplemented()
                 }
@@ -100,9 +166,189 @@ class MainActivity : FlutterActivity() {
                         stopAlarmSound()
                         result.success(true)
                     }
+                    "userReturnedToApp" -> {
+                        onUserReturned()
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // ─── FULL LOCK METHODS ───
+
+    private fun enableFullLock() {
+        runOnUiThread {
+            try {
+                Log.d("PhoneLock", "🔒 Enabling full lock...")
+
+                // 1. Enable app pinning
+                enablePhoneLock()
+
+                // 2. Enable full screen
+                enableFullScreenLock()
+
+                // 3. Prevent power off
+                preventPowerOff(true)
+
+                // 4. Keep screen on
+                window.addFlags(LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                // 5. Block system UI
+                blockSystemUI()
+
+                // 6. Acquire wake lock
+                wakeLock?.acquire(30 * 60 * 1000L) // 30 minutes
+
+                isFullLockActive = true
+                Log.d("PhoneLock", "✅ Full lock enabled successfully")
+            } catch (e: Exception) {
+                Log.e("PhoneLock", "enableFullLock error: ${e.message}")
+            }
+        }
+    }
+
+    private fun disableFullLock() {
+        runOnUiThread {
+            try {
+                Log.d("PhoneLock", "🔓 Disabling full lock...")
+
+                // 1. Disable app pinning
+                disablePhoneLock()
+
+                // 2. Disable full screen
+                disableFullScreenLock()
+
+                // 3. Allow power off
+                preventPowerOff(false)
+
+                // 4. Clear keep screen on
+                window.clearFlags(LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                // 5. Restore system UI
+                restoreSystemUI()
+
+                // 6. Release wake lock
+                wakeLock?.release()
+
+                isFullLockActive = false
+                Log.d("PhoneLock", "✅ Full lock disabled successfully")
+            } catch (e: Exception) {
+                Log.e("PhoneLock", "disableFullLock error: ${e.message}")
+            }
+        }
+    }
+
+    private fun enableFullScreenLock() {
+        try {
+            window.addFlags(
+                LayoutParams.FLAG_FULLSCREEN or
+                        LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                window.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION or
+                                View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+                                View.SYSTEM_UI_FLAG_FULLSCREEN
+                        )
+            }
+
+            Log.d("PhoneLock", "✅ Full screen lock enabled")
+        } catch (e: Exception) {
+            Log.e("PhoneLock", "enableFullScreenLock error: ${e.message}")
+        }
+    }
+
+    private fun disableFullScreenLock() {
+        try {
+            window.clearFlags(
+                LayoutParams.FLAG_FULLSCREEN or
+                        LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                window.decorView.systemUiVisibility = (
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+                                View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        )
+            }
+
+            Log.d("PhoneLock", "✅ Full screen lock disabled")
+        } catch (e: Exception) {
+            Log.e("PhoneLock", "disableFullScreenLock error: ${e.message}")
+        }
+    }
+
+    private fun blockSystemUI() {
+        try {
+            // Block navigation gestures
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+                insetsController.hide(WindowInsetsCompat.Type.systemBars())
+                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            }
+
+            // Disable notifications pull-down (Android 10+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.setFlags(
+                    LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    LayoutParams.FLAG_NOT_TOUCH_MODAL
+                )
+            }
+
+            Log.d("PhoneLock", "✅ System UI blocked")
+        } catch (e: Exception) {
+            Log.e("PhoneLock", "blockSystemUI error: ${e.message}")
+        }
+    }
+
+    private fun restoreSystemUI() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+                insetsController.show(WindowInsetsCompat.Type.systemBars())
+                insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_BARS_BY_TOUCH
+            }
+
+            window.clearFlags(LayoutParams.FLAG_NOT_TOUCH_MODAL)
+
+            Log.d("PhoneLock", "✅ System UI restored")
+        } catch (e: Exception) {
+            Log.e("PhoneLock", "restoreSystemUI error: ${e.message}")
+        }
+    }
+
+    private fun preventPowerOff(prevent: Boolean) {
+        try {
+            if (prevent) {
+                // Acquire partial wake lock to prevent sleep
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                val partialWakeLock = powerManager.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK or
+                            PowerManager.ACQUIRE_CAUSES_WAKEUP or
+                            PowerManager.ON_AFTER_RELEASE,
+                    "Pomodoro::PreventPowerOff"
+                )
+                partialWakeLock.acquire(10 * 60 * 1000L) // 10 minutes
+                Log.d("PhoneLock", "✅ Power off prevented")
+            }
+        } catch (e: Exception) {
+            Log.e("PhoneLock", "preventPowerOff error: ${e.message}")
+        }
+    }
+
+    private fun isPowerOffPrevented(): Boolean {
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            return powerManager.isInteractive
+        } catch (e: Exception) {
+            return false
+        }
     }
 
     // ─── PHONE LOCK METHODS ───
@@ -110,10 +356,10 @@ class MainActivity : FlutterActivity() {
     private fun enablePhoneLock() {
         runOnUiThread {
             try {
-                window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                window.addFlags(LayoutParams.FLAG_KEEP_SCREEN_ON)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.ICE_CREAM_SANDWICH) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    window.addFlags(LayoutParams.FLAG_SECURE)
                 }
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -133,8 +379,8 @@ class MainActivity : FlutterActivity() {
     private fun disablePhoneLock() {
         runOnUiThread {
             try {
-                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                window.clearFlags(LayoutParams.FLAG_KEEP_SCREEN_ON)
+                window.clearFlags(LayoutParams.FLAG_SECURE)
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     try {
@@ -162,20 +408,101 @@ class MainActivity : FlutterActivity() {
         return false
     }
 
+    // ─── KEY EVENT OVERRIDES ───
+
     override fun onBackPressed() {
-        if (isLockTaskModeEnabled()) {
+        if (isFullLockActive) {
+            Log.d("PhoneLock", "🚫 Back button blocked by full lock")
             return
         }
         super.onBackPressed()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
+        // Block system keys when full lock is active
+        if (isFullLockActive) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_HOME,
+                KeyEvent.KEYCODE_APP_SWITCH,
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_MENU,
+                KeyEvent.KEYCODE_SEARCH,
+                KeyEvent.KEYCODE_ASSIST,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT,
+                KeyEvent.KEYCODE_NAVIGATE_IN,
+                KeyEvent.KEYCODE_NAVIGATE_OUT -> {
+                    Log.d("PhoneLock", "🚫 System key blocked: $keyCode")
+                    return true
+                }
+                KeyEvent.KEYCODE_POWER -> {
+                    // Allow power button but prevent power menu
+                    Log.d("PhoneLock", "🔋 Power button pressed - Power menu blocked")
+                    return true
+                }
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN -> {
+                    // Allow volume buttons
+                    return super.onKeyDown(keyCode, event)
+                }
+                else -> {
+                    // Allow all other keys
+                    return super.onKeyDown(keyCode, event)
+                }
+            }
+        }
+
         // Block home button when overlay is showing
         if (isOverlayShowing && (keyCode == KeyEvent.KEYCODE_HOME ||
                     keyCode == KeyEvent.KEYCODE_APP_SWITCH)) {
+            Log.d("ForcedReturn", "🚫 Home/App switch blocked during overlay")
             return true
         }
+
         return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
+        // Block key up events for blocked keys
+        if (isFullLockActive) {
+            when (keyCode) {
+                KeyEvent.KEYCODE_HOME,
+                KeyEvent.KEYCODE_APP_SWITCH,
+                KeyEvent.KEYCODE_BACK,
+                KeyEvent.KEYCODE_MENU,
+                KeyEvent.KEYCODE_SEARCH,
+                KeyEvent.KEYCODE_ASSIST,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_DOWN,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_LEFT,
+                KeyEvent.KEYCODE_SYSTEM_NAVIGATION_RIGHT,
+                KeyEvent.KEYCODE_NAVIGATE_IN,
+                KeyEvent.KEYCODE_NAVIGATE_OUT,
+                KeyEvent.KEYCODE_POWER -> {
+                    return true
+                }
+                else -> {
+                    return super.onKeyUp(keyCode, event)
+                }
+            }
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    // ─── WINDOW FOCUS ───
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+
+        if (isFullLockActive && hasFocus) {
+            // Re-apply full lock when window gets focus
+            enableFullLock()
+        }
+
+        if (isFullLockActive && !hasFocus) {
+            // Keep lock active even when focus is lost
+            Log.d("PhoneLock", "🔒 Lock maintained while focus lost")
+        }
     }
 
     // ─── FORCED RETURN OVERLAY METHODS ───
@@ -231,7 +558,6 @@ class MainActivity : FlutterActivity() {
                 val subtitleView = overlayView?.findViewById<TextView>(R.id.overlay_subtitle)
                 val countdownView = overlayView?.findViewById<TextView>(R.id.overlay_countdown)
                 val returnButton = overlayView?.findViewById<Button>(R.id.overlay_return_button)
-                // REMOVED: statusText - not needed
 
                 titleView?.text = title
                 subtitleView?.text = subtitle
@@ -286,23 +612,18 @@ class MainActivity : FlutterActivity() {
 
     private fun playAlarmSound() {
         try {
-            // Release any existing player
             stopAlarmSound()
 
-            // Create new media player with alarm sound
             mediaPlayer = MediaPlayer().apply {
-                // Use default alarm sound
                 val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
 
                 if (alarmUri != null) {
                     setDataSource(this@MainActivity, alarmUri)
                 } else {
-                    // Fallback: Use notification sound if alarm not available
                     val notificationUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
                     if (notificationUri != null) {
                         setDataSource(this@MainActivity, notificationUri)
                     } else {
-                        // Last resort: Use a built-in sound
                         val fallbackUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
                         if (fallbackUri != null) {
                             setDataSource(this@MainActivity, fallbackUri)
@@ -310,7 +631,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                // Set audio attributes
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     setAudioAttributes(
                         AudioAttributes.Builder()
@@ -323,7 +643,6 @@ class MainActivity : FlutterActivity() {
                     setAudioStreamType(AudioManager.STREAM_ALARM)
                 }
 
-                // Start with low volume
                 currentVolume = 0.3f
                 setVolume(currentVolume, currentVolume)
                 isLooping = true
@@ -334,7 +653,6 @@ class MainActivity : FlutterActivity() {
             }
         } catch (e: Exception) {
             Log.e("ForcedReturn", "playAlarmSound error: ${e.message}")
-            // Try fallback with ringtone
             try {
                 playFallbackSound()
             } catch (e2: Exception) {
@@ -386,13 +704,12 @@ class MainActivity : FlutterActivity() {
                             Log.d("ForcedReturn", "🔊 Volume increased to ${(currentVolume * 100).toInt()}%")
                         }
                     } else {
-                        // Stop volume increase if overlay is dismissed
                         timer?.cancel()
                         timer = null
                     }
                 }
             }
-        }, 1000, 1000) // Increase every second
+        }, 1000, 1000)
     }
 
     private fun startCountdown(countdownSeconds: Int) {
@@ -408,8 +725,6 @@ class MainActivity : FlutterActivity() {
                             countdownView?.text = "⏰ NOW!"
                             mediaPlayer?.setVolume(1.0f, 1.0f)
                             Log.d("ForcedReturn", "⏰ Countdown ended! MAX VOLUME!")
-
-                            // Vibrate if possible
                             vibrateDevice()
                         } else {
                             countdownView?.text = countdown.toString()
@@ -427,15 +742,12 @@ class MainActivity : FlutterActivity() {
         try {
             val vibrator = getSystemService(Context.VIBRATOR_SERVICE) as android.os.Vibrator?
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Fixed: Use VibrationEffect.createOneShot instead of createPattern
                 vibrator?.vibrate(
                     VibrationEffect.createOneShot(1000, VibrationEffect.DEFAULT_AMPLITUDE)
                 )
-                // Or for pattern vibration:
-                // vibrator?.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 500, 500), 0))
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(1000) // Simple vibration for older devices
+                vibrator?.vibrate(1000)
             }
             Log.d("ForcedReturn", "📳 Vibration started")
         } catch (e: Exception) {
@@ -524,14 +836,11 @@ class MainActivity : FlutterActivity() {
         try {
             isOverlayDismissed = true
 
-            // Cancel timer
             timer?.cancel()
             timer = null
 
-            // Stop alarm
             stopAlarmSound()
 
-            // Remove overlay view
             overlayView?.let { view ->
                 try {
                     windowManager?.removeView(view)
@@ -555,20 +864,8 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         dismissOverlay()
+        disableFullLock()
+        wakeLock?.release()
         super.onDestroy()
-    }
-
-    // Add this to handle screen wake
-    private fun wakeScreen() {
-        try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            val wakeLock = powerManager.newWakeLock(
-                PowerManager.FULL_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
-                "ForcedReturnWakeLock"
-            )
-            wakeLock.acquire(10000) // Release after 10 seconds
-        } catch (e: Exception) {
-            Log.e("ForcedReturn", "Wake screen error: ${e.message}")
-        }
     }
 }

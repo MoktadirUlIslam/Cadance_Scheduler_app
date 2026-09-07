@@ -8,7 +8,7 @@ import '../../../models/calendar_models.dart';
 import '../../../models/taskmanager_model.dart';
 import '../../../utilites/app_colors.dart';
 import '../../Event_Maneger/providers/event_provider.dart';
-import '../../Task_manager/providers/task_provider.dart';
+import '../../Task_manager/providers/Task_provider.dart';
 
 class TodayTasksAndEvents extends StatefulWidget {
   final bool isDarkMode;
@@ -30,34 +30,36 @@ class _TodayTasksAndEventsState extends State<TodayTasksAndEvents> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        context.read<TaskProvider>().loadTasksForDate(DateTime.now());
-      }
-    });
+    // No need to load tasks here - DataProvider handles it
   }
 
   @override
   Widget build(BuildContext context) {
-    final taskProvider = context.watch<TaskProvider>();
+    final dataProvider = context.watch<DataProvider>();
     final eventProvider = context.watch<EventProvider>();
+    final taskProvider = context.watch<TaskProvider>();
 
-    final todayTasks = taskProvider.tasksForSelectedDate;
+    // ✅ Get today's tasks from DataProvider
+    final today = DateTime.now();
+    final todayTasks = dataProvider.getTasksForDate(today);
+
+    // Filter pending tasks
     final pendingTasks = todayTasks.where((t) => !t.isDone).toList();
     final todayEvents = eventProvider.getTodayEvents();
 
     // ✅ Get upcoming events for next 3 days (today + next 3 days = 4 days total)
     final upcomingEvents = _getUpcomingEventsInRange(eventProvider, daysRange: 4);
 
-    // ✅ Get upcoming tasks for next 3 days (today + next 3 days = 4 days total)
-    final upcomingTasks = _getUpcomingTasksInRange(taskProvider.allTasks, daysRange: 4);
+    // ✅ Get upcoming tasks from DataProvider
+    final allTasks = dataProvider.tasks;
+    final upcomingTasks = _getUpcomingTasksInRange(allTasks, daysRange: 4);
 
     // Separate missed tasks from pending tasks for Today tab
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final todayDate = DateTime(now.year, now.month, now.day);
     final missedTasks = pendingTasks.where((task) {
       return task.deadline != null &&
-          task.deadline!.isBefore(today) &&
+          task.deadline!.isBefore(todayDate) &&
           !task.isDone;
     }).toList();
     final activeTasks = pendingTasks.where((task) {
@@ -83,11 +85,15 @@ class _TodayTasksAndEventsState extends State<TodayTasksAndEvents> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildHeader(missedTasks: missedTasks),
+            _buildHeader(
+              missedTasks: missedTasks,
+              dataProvider: dataProvider,
+              eventProvider: eventProvider,
+            ),
             const SizedBox(height: 8),
             _buildTabSelector(),
             const SizedBox(height: 10),
-            taskProvider.isLoading
+            dataProvider.isLoadingTasks
                 ? const SizedBox(
               height: 60,
               child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
@@ -113,22 +119,24 @@ class _TodayTasksAndEventsState extends State<TodayTasksAndEvents> {
     );
   }
 
-  Widget _buildHeader({required List<Task> missedTasks}) {
+  Widget _buildHeader({
+    required List<Task> missedTasks,
+    required DataProvider dataProvider,
+    required EventProvider eventProvider,
+  }) {
     int totalItems = 0;
     String title = '';
 
     if (_selectedTab == 0) {
-      final taskProvider = context.watch<TaskProvider>();
-      final eventProvider = context.watch<EventProvider>();
-      final todayTasks = taskProvider.tasksForSelectedDate;
+      final today = DateTime.now();
+      final todayTasks = dataProvider.getTasksForDate(today);
       final pendingTasks = todayTasks.where((t) => !t.isDone).toList();
       final todayEvents = eventProvider.getTodayEvents();
       totalItems = pendingTasks.length + todayEvents.length;
       title = 'Today';
     } else {
-      final taskProvider = context.watch<TaskProvider>();
-      final eventProvider = context.watch<EventProvider>();
-      final upcomingTasks = _getUpcomingTasksInRange(taskProvider.allTasks, daysRange: 4);
+      final allTasks = dataProvider.tasks;
+      final upcomingTasks = _getUpcomingTasksInRange(allTasks, daysRange: 4);
       final upcomingEvents = _getUpcomingEventsInRange(eventProvider, daysRange: 4);
       totalItems = upcomingTasks.length + upcomingEvents.length;
       title = 'Upcoming 3 Days';
@@ -769,6 +777,7 @@ class _CompactTaskItem extends StatelessWidget {
     }
 
     final isMissed = displayText == 'Missed';
+    final isAutoCompleted = task.isDone && task.autoCompleted;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -779,7 +788,9 @@ class _CompactTaskItem extends StatelessWidget {
         border: Border.all(
           color: isMissed
               ? Colors.red.withOpacity(0.3)
-              : (isDarkMode ? AppColors.darkBorder : AppColors.border).withOpacity(0.3),
+              : (isAutoCompleted
+              ? Colors.purple.withOpacity(0.3)
+              : (isDarkMode ? AppColors.darkBorder : AppColors.border).withOpacity(0.3)),
           width: isMissed ? 1.5 : 0.5,
         ),
       ),
@@ -789,7 +800,9 @@ class _CompactTaskItem extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-              color: isMissed ? Colors.red : task.priorityColor,
+              color: isMissed
+                  ? Colors.red
+                  : (isAutoCompleted ? Colors.purple : task.priorityColor),
               shape: BoxShape.circle,
             ),
           ),
@@ -798,18 +811,53 @@ class _CompactTaskItem extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  task.displayTitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: isMissed
-                        ? Colors.red
-                        : (isDarkMode ? Colors.white : AppColors.ink),
-                    decoration: task.isDone ? TextDecoration.lineThrough : null,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        task.displayTitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          color: isMissed
+                              ? Colors.red
+                              : (task.isDone
+                              ? (isDarkMode ? Colors.grey : Colors.grey.shade600)
+                              : (isDarkMode ? Colors.white : AppColors.ink)),
+                          decoration: task.isDone ? TextDecoration.lineThrough : null,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isAutoCompleted)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.auto_awesome,
+                              size: 8,
+                              color: Colors.purple,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              'Auto',
+                              style: TextStyle(
+                                fontSize: 7,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.purple,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
                 if (showType && task.type.label.isNotEmpty)
                   Text(

@@ -1,7 +1,6 @@
 // lib/screens/Event_Maneger/components/event_widgets.dart
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:pomodoro/utilites/app_colors.dart';
 import 'package:table_calendar/table_calendar.dart';
 import '../../../models/calendar_models.dart';
@@ -162,7 +161,7 @@ class EventCalendarWidget extends StatelessWidget {
                           height: 6,
                           margin: const EdgeInsets.symmetric(horizontal: 1),
                           decoration: BoxDecoration(
-                            color: category?.color,
+                            color: category.color,
                             shape: BoxShape.circle,
                           ),
                         );
