@@ -28,8 +28,26 @@ class UserAuthProvider extends ChangeNotifier {
   bool get authChecked => _authChecked;
 
   UserAuthProvider() {
+    // ✅ Set persistence for web only on initialization
+    _setPersistenceIfWeb();
     _initAuthListener();
     _checkCurrentUser();
+  }
+
+  // ────────────────────────────────────────────────
+  // ✅ FIX: setPersistence() throws UnimplementedError
+  // on Android/iOS — it's web-only. Guard with kIsWeb.
+  // Mobile persists sessions locally by default, so
+  // there's nothing to set there.
+  // ────────────────────────────────────────────────
+  Future<void> _setPersistenceIfWeb() async {
+    if (!kIsWeb) return;
+    try {
+      await _auth.setPersistence(Persistence.LOCAL);
+      print('✅ Auth persistence set to LOCAL for web');
+    } catch (e) {
+      print('⚠️ Error setting persistence: $e');
+    }
   }
 
   void initialize(DataProvider dataProvider) {
@@ -40,6 +58,9 @@ class UserAuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ────────────────────────────────────────────────
+  // Check current user (session restore on app start)
+  // ────────────────────────────────────────────────
   Future<void> _checkCurrentUser() async {
     if (_isCheckingSession) return;
 
@@ -49,10 +70,14 @@ class UserAuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // ✅ Only relevant on web
+      await _setPersistenceIfWeb();
+
       final currentUser = _auth.currentUser;
 
       if (currentUser != null) {
         try {
+          // Force token refresh to check validity
           await currentUser.getIdToken(true);
           _user = UserModel.fromFirebaseUser(currentUser);
           print('✅ Auth session restored for: ${_user?.email}');
@@ -83,6 +108,9 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
+  // ────────────────────────────────────────────────
+  // Auth state listener
+  // ────────────────────────────────────────────────
   void _initAuthListener() {
     _firebaseService.authStateChanges.listen((User? firebaseUser) async {
       if (_isCheckingSession) return;
@@ -90,9 +118,11 @@ class UserAuthProvider extends ChangeNotifier {
       try {
         if (firebaseUser != null) {
           try {
+            // ✅ Only relevant on web
+            await _setPersistenceIfWeb();
             await firebaseUser.getIdToken(true);
             _user = UserModel.fromFirebaseUser(firebaseUser);
-            print('✅ Auth state changed: User logged in');
+            print('✅ Auth state changed: User logged in (${_user?.email})');
 
             if (_dataProvider != null) {
               await _refreshDataProvider();
@@ -144,7 +174,10 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
-  // ✅ NEW: Check if email exists in database
+  // ────────────────────────────────────────────────
+  // EMAIL CHECK METHODS
+  // ────────────────────────────────────────────────
+
   Future<bool> checkEmailExists(String email) async {
     try {
       final userDoc = await _firebaseService.getUserByEmail(email);
@@ -155,14 +188,12 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
-  // ✅ UPDATED: Reset password with email existence check
   Future<Map<String, dynamic>> resetPasswordWithCheck(String email) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
 
     try {
-      // Step 1: Check if email exists in database
       final emailExists = await checkEmailExists(email);
 
       if (!emailExists) {
@@ -174,7 +205,6 @@ class UserAuthProvider extends ChangeNotifier {
         };
       }
 
-      // Step 2: Email exists, send reset link
       await _firebaseService.resetPassword(email);
       _isLoading = false;
       notifyListeners();
@@ -196,7 +226,6 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
-  // ✅ Keep old resetPassword method for backward compatibility
   Future<bool> resetPassword(String email) async {
     _isLoading = true;
     _error = null;
@@ -217,6 +246,9 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
+  // ────────────────────────────────────────────────
+  // Sign Up
+  // ────────────────────────────────────────────────
   Future<bool> signUp({
     required String username,
     required String email,
@@ -227,16 +259,15 @@ class UserAuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // ✅ Only relevant on web
+      await _setPersistenceIfWeb();
+
       final userModel = await _firebaseService.signUpWithEmail(
         username: username,
         email: email,
         password: password,
       );
       _user = userModel;
-
-      if (kIsWeb) {
-        await _auth.setPersistence(Persistence.LOCAL);
-      }
 
       _isLoading = false;
       if (_dataProvider != null) {
@@ -256,6 +287,9 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
+  // ────────────────────────────────────────────────
+  // Sign In
+  // ────────────────────────────────────────────────
   Future<bool> signIn({
     required String email,
     required String password,
@@ -265,15 +299,14 @@ class UserAuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // ✅ Only relevant on web
+      await _setPersistenceIfWeb();
+
       final userModel = await _firebaseService.signInWithEmail(
         email: email,
         password: password,
       );
       _user = userModel;
-
-      if (kIsWeb) {
-        await _auth.setPersistence(Persistence.LOCAL);
-      }
 
       _isLoading = false;
       if (_dataProvider != null) {
@@ -293,6 +326,9 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
+  // ────────────────────────────────────────────────
+  // SIGN OUT
+  // ────────────────────────────────────────────────
   Future<void> signOut() async {
     try {
       await _firebaseService.signOut();
@@ -307,8 +343,14 @@ class UserAuthProvider extends ChangeNotifier {
     }
   }
 
+  // ────────────────────────────────────────────────
+  // SESSION VALIDATION
+  // ────────────────────────────────────────────────
   Future<bool> checkSessionValidity() async {
     try {
+      // ✅ Only relevant on web
+      await _setPersistenceIfWeb();
+
       final currentUser = _auth.currentUser;
       if (currentUser != null) {
         await currentUser.getIdToken(true);

@@ -17,8 +17,20 @@ class FirebaseService {
   User? get currentUser => _auth.currentUser;
 
   Stream<User?> get authStateChanges {
-    // Ensure we're listening to auth state changes properly
     return _auth.authStateChanges();
+  }
+
+  // ────────────────────────────────────────────────
+  // ✅ FIX: setPersistence is web-only. Guard with kIsWeb
+  // so it never runs (and never throws) on Android/iOS.
+  // ────────────────────────────────────────────────
+  Future<void> _setPersistenceIfWeb() async {
+    if (!kIsWeb) return; // Mobile persists sessions locally by default
+    try {
+      await _auth.setPersistence(Persistence.LOCAL);
+    } catch (e) {
+      print('⚠️ Error setting persistence: $e');
+    }
   }
 
   // ────────────────────────────────────────────────
@@ -31,6 +43,9 @@ class FirebaseService {
     required String password,
   }) async {
     try {
+      // ✅ Only set persistence on web
+      await _setPersistenceIfWeb();
+
       final UserCredential result = await _auth.createUserWithEmailAndPassword(
         email: email.trim(),
         password: password,
@@ -64,19 +79,19 @@ class FirebaseService {
     required String password,
   }) async {
     try {
+      // ✅ Only set persistence on web
+      await _setPersistenceIfWeb();
+
       final UserCredential result = await _auth.signInWithEmailAndPassword(
         email: email.trim(),
         password: password,
       );
 
-      // On mobile, Firebase Auth automatically persists the session
-      // On web, we need to explicitly set persistence
-      if (kIsWeb) {
-        await _auth.setPersistence(Persistence.LOCAL);
-      }
-
       // Force token refresh to ensure valid session
       await result.user!.getIdToken(true);
+
+      // Update last login
+      await updateLastLogin(result.user!.uid);
 
       return UserModel.fromFirebaseUser(result.user!);
     } on FirebaseAuthException catch (e) {
@@ -196,7 +211,7 @@ class FirebaseService {
   }
 
   // ────────────────────────────────────────────────
-  // ✅ NEW: GET USER BY EMAIL
+  // GET USER BY EMAIL
   // ────────────────────────────────────────────────
 
   /// Check if a user exists with the given email
@@ -380,7 +395,6 @@ class FirebaseService {
         return e.message ?? 'An unexpected error occurred. Please try again.';
     }
   }
-
 
   /// Check if Firebase services are working
   Future<bool> checkFirebaseHealth() async {
