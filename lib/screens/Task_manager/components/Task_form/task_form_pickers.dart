@@ -201,7 +201,7 @@ class _DatePickerWithRecurringState extends State<DatePickerWithRecurring> {
             Expanded(
               child: _buildFrequencyOption(
                 RecurrenceFrequency.weekly,
-                'Weekly (7 days)',
+                'Weekly',
                 Icons.repeat,
               ),
             ),
@@ -209,7 +209,7 @@ class _DatePickerWithRecurringState extends State<DatePickerWithRecurring> {
             Expanded(
               child: _buildFrequencyOption(
                 RecurrenceFrequency.biWeekly,
-                'Bi-Weekly (14 days)',
+                'Bi-Weekly',
                 Icons.repeat_on,
               ),
             ),

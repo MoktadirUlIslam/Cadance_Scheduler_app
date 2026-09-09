@@ -1,51 +1,26 @@
 {
   "project_info": {
-    "project_number": "286172253797",
-    "project_id": "cadance-9cd1d",
-    "storage_bucket": "cadance-9cd1d.firebasestorage.app"
+    "project_number": "899222378747",
+    "project_id": "cadance-new",
+    "storage_bucket": "cadance-new.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:286172253797:android:7dfe481aef413d669ac08c",
+        "mobilesdk_app_id": "1:899222378747:android:ade0d9931858cdbb8f385e",
         "android_client_info": {
           "package_name": "com.example.pomodoro"
         }
       },
-      "oauth_client": [
-        {
-          "client_id": "286172253797-qe565ec94li00et1177v2cq1g9j9vh01.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.example.pomodoro",
-            "certificate_hash": "1234567890abcdef1234567890abcdef12345678"
-          }
-        },
-        {
-          "client_id": "286172253797-ki8eibuedj0bu46iic5d8mo7sctokmc3.apps.googleusercontent.com",
-          "client_type": 3
-        }
-      ],
+      "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCKmRBwZlDpbN5H6XbGpGbyzxdOjxR6dF4"
+          "current_key": "AIzaSyAGLQq1B38Kog5KDmmUMsdDFuthqgxVv5Q"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": [
-            {
-              "client_id": "286172253797-ki8eibuedj0bu46iic5d8mo7sctokmc3.apps.googleusercontent.com",
-              "client_type": 3
-            },
-            {
-              "client_id": "286172253797-soe2rai70j9ge1t116qbkjpsfh9ckfvf.apps.googleusercontent.com",
-              "client_type": 2,
-              "ios_info": {
-                "bundle_id": "com.example.pomodoro"
-              }
-            }
-          ]
+          "other_platform_oauth_client": []
         }
       }
     }

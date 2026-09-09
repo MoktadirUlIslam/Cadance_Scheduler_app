@@ -39,23 +39,36 @@ class TaskCard extends StatelessWidget {
     return Dismissible(
       key: Key('task_${task.id ?? DateTime.now().millisecondsSinceEpoch}'),
       direction: canSwipeToComplete ? DismissDirection.startToEnd : DismissDirection.none,
-      onDismissed: (direction) {
+      resizeDuration: const Duration(milliseconds: 300),
+      // ✅ FIX: Use confirmDismiss to trigger action, always return false
+      confirmDismiss: (direction) async {
         if (direction == DismissDirection.startToEnd) {
           HapticFeedback.lightImpact();
           onToggleComplete(task);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(_getCompletionMessage()),
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 2),
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+
+          Future.delayed(const Duration(milliseconds: 100), () {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(_getCompletionMessage()),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 2),
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
-            ),
-          );
+            );
+          });
+
+          // Prevent actual dismissal – widget stays in tree
+          return false;
         }
+        return false;
       },
+      dismissThresholds: const {
+        DismissDirection.startToEnd: 0.3,
+      },
+      movementDuration: const Duration(milliseconds: 300),
       background: Container(
         decoration: BoxDecoration(
           color: Colors.green,
@@ -225,7 +238,7 @@ class TaskCard extends StatelessWidget {
                     const Spacer(),
 
                     if (task.isDone)
-                    // Completed badge - SIMPLIFIED (no auto prefix here)
+                    // Completed badge
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                         decoration: BoxDecoration(
@@ -337,7 +350,6 @@ class TaskCard extends StatelessWidget {
   }
 
   String _getCompletionLabel() {
-    // Don't add "Auto-" here - the status indicator already shows auto
     switch (task.type) {
       case TaskType.assignment:
         return 'Submitted';
@@ -438,7 +450,6 @@ class TaskCard extends StatelessWidget {
 
   String _getStatusLabel() {
     if (task.isDone) {
-      // Only show "Auto-" prefix in the status indicator
       final baseLabel = _getCompletionLabel();
       return task.autoCompleted ? 'Auto-$baseLabel' : baseLabel;
     }

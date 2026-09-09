@@ -11,6 +11,11 @@ class TaskNotificationHelper {
   bool _isInitialized = false;
   bool _isInitializing = false;
 
+  // ============================================================
+  // HELPER: Clamp to 32-bit signed positive integer
+  // ============================================================
+  int _clampId(int id) => id.abs() & 0x7FFFFFFF;
+
   Future<void> initialize() async {
     if (_isInitialized) return;
     if (_isInitializing) {
@@ -78,7 +83,7 @@ class TaskNotificationHelper {
       print('   Reminders: ${reminders.map((r) => r.label).join(', ')}');
 
       int baseId = task.id?.hashCode ?? DateTime.now().millisecondsSinceEpoch;
-      baseId = baseId.abs();
+      baseId = _clampId(baseId); // ✅ Clamp to 32-bit
 
       int scheduledCount = 0;
 
@@ -87,7 +92,7 @@ class TaskNotificationHelper {
         final notificationTime = baseTime.subtract(reminder.duration);
 
         if (notificationTime.isAfter(DateTime.now())) {
-          final notificationId = (baseId + i + 1).abs();
+          final notificationId = _clampId(baseId + i + 1); // ✅ Clamp
 
           final title = _buildNotificationTitle(task);
           final body = _buildNotificationBody(task);
@@ -114,28 +119,22 @@ class TaskNotificationHelper {
   }
 
   // ============================================================
-  // CANCEL TASK NOTIFICATIONS (FIXED)
+  // CANCEL TASK NOTIFICATIONS
   // ============================================================
 
-  /// Cancel all notifications for a specific task
   Future<void> cancelTaskNotifications(String taskId) async {
     try {
       await initialize();
       if (!_isInitialized) return;
 
-      // Get all pending notifications
       final pending = await _notificationService.getPendingNotifications();
 
-      // Find notifications for this task (using taskId as part of the notification ID)
-      // We use a specific ID pattern: taskId.hashCode + i
-      final taskIdHash = taskId.hashCode.abs();
+      final taskIdHash = _clampId(taskId.hashCode); // ✅ Clamp
 
       int cancelledCount = 0;
       for (final notification in pending) {
-        // Check if this notification belongs to this task
-        // We use the pattern: (taskIdHash + i) where i is 1-10
         for (int i = 1; i <= 10; i++) {
-          final expectedId = (taskIdHash + i).abs();
+          final expectedId = _clampId(taskIdHash + i); // ✅ Clamp
           if (notification.id == expectedId) {
             await _notificationService.cancelNotification(notification.id);
             cancelledCount++;
@@ -150,14 +149,14 @@ class TaskNotificationHelper {
     }
   }
 
-  /// Cancel a specific notification by ID
   Future<void> cancelSpecificNotification(int notificationId) async {
     try {
       await initialize();
       if (!_isInitialized) return;
 
-      await _notificationService.cancelNotification(notificationId.abs());
-      print('✅ Cancelled notification: ${notificationId.abs()}');
+      final clamped = _clampId(notificationId); // ✅ Clamp
+      await _notificationService.cancelNotification(clamped);
+      print('✅ Cancelled notification: $clamped');
     } catch (e) {
       print('❌ Error cancelling notification $notificationId: $e');
     }
@@ -178,6 +177,8 @@ class TaskNotificationHelper {
       await initialize();
       if (!_isInitialized) return;
 
+      final clampedId = _clampId(notificationId); // ✅ Clamp
+
       final title = '⏰ Deadline Reminder: ${task.displayTitle}';
       final buffer = StringBuffer();
       buffer.writeln('📋 Task: ${task.displayTitle}');
@@ -195,7 +196,7 @@ class TaskNotificationHelper {
       buffer.writeln('⚠️ Please complete your task before the deadline!');
 
       await _notificationService.scheduleTaskNotification(
-        notificationId: notificationId,
+        notificationId: clampedId,
         title: title,
         body: buffer.toString(),
         scheduledTime: scheduledTime,
@@ -249,7 +250,7 @@ class TaskNotificationHelper {
         buffer.writeln('🎉 Great job!');
       }
 
-      final notificationId = DateTime.now().millisecondsSinceEpoch.abs();
+      final notificationId = _clampId(DateTime.now().millisecondsSinceEpoch); // ✅ Clamp
 
       await _notificationService.showImmediateNotification(
         notificationId: notificationId,
@@ -295,7 +296,7 @@ class TaskNotificationHelper {
       buffer.writeln();
       buffer.writeln('⚠️ Please complete before the new deadline!');
 
-      final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 1;
+      final notificationId = _clampId(DateTime.now().millisecondsSinceEpoch + 1); // ✅ Clamp
 
       await _notificationService.showImmediateNotification(
         notificationId: notificationId,
@@ -337,7 +338,7 @@ class TaskNotificationHelper {
       buffer.writeln();
       buffer.writeln('⏰ Please complete this task!');
 
-      final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 2;
+      final notificationId = _clampId(DateTime.now().millisecondsSinceEpoch + 2); // ✅ Clamp
 
       await _notificationService.showImmediateNotification(
         notificationId: notificationId,
@@ -398,7 +399,7 @@ class TaskNotificationHelper {
         }
       }
 
-      final notificationId = DateTime.now().millisecondsSinceEpoch.abs() + 3;
+      final notificationId = _clampId(DateTime.now().millisecondsSinceEpoch + 3); // ✅ Clamp
 
       await _notificationService.showImmediateNotification(
         notificationId: notificationId,
@@ -414,7 +415,7 @@ class TaskNotificationHelper {
   }
 
   // ============================================================
-  // SCHEDULE OVERDUE REMINDERS (FIXED - removed duplicate)
+  // SCHEDULE OVERDUE REMINDERS
   // ============================================================
 
   Future<void> scheduleOverdueReminders(Task task) async {
@@ -432,7 +433,7 @@ class TaskNotificationHelper {
       );
 
       final nextReminderTime = DateTime.now().add(interval);
-      final notificationId = (task.id.hashCode + 999).abs();
+      final notificationId = _clampId(task.id.hashCode + 999); // ✅ Clamp
 
       final buffer = StringBuffer();
       buffer.writeln('Your task "${task.displayTitle}" is still overdue!');

@@ -42,7 +42,13 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     super.initState();
     _initAnimation();
     _initServices();
-    _loadInitialData();
+
+    // ✅ FIX: Load data after the first frame to avoid calling notifyListeners during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadInitialData();
+      }
+    });
 
     // Run completion checks every 10 minutes
     _completionTimer = Timer.periodic(
@@ -83,7 +89,9 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
         onTasksUpdated: (tasks) {
           // Update TaskProvider when tasks change
           taskProvider.setTasks(tasks);
-          setState(() {});
+          if (mounted) {
+            setState(() {});
+          }
         },
       );
 
@@ -121,6 +129,10 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
       // Update TaskProvider with fresh data
       final taskProvider = context.read<TaskProvider>();
       taskProvider.setTasks(dataProvider.tasks);
+
+      if (mounted) {
+        setState(() {});
+      }
 
       debugPrint('✅ Completion checks completed');
     } catch (e) {
@@ -391,7 +403,6 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
   }
 
   Widget _buildTaskList(List<Task> tasks, DataProvider dataProvider, TaskProvider taskProvider) {
-
     if (tasks.isEmpty) {
       return _buildEmptyState();
     }
@@ -498,6 +509,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                 if (mounted) {
                   Navigator.pop(context);
                   _showSnackBar('Task "${task.displayTitle}" added! 🎉');
+                  setState(() {});
                 }
               } catch (e) {
                 if (mounted) {
@@ -545,6 +557,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
                 if (mounted) {
                   Navigator.pop(context);
                   _showSnackBar('Task "${updatedTask.displayTitle}" updated! ✅');
+                  setState(() {});
                 }
               } catch (e) {
                 if (mounted) {
@@ -563,7 +576,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
 
   Future<void> _handleToggleComplete(Task task, DataProvider dataProvider, TaskProvider taskProvider) async {
     try {
-      // ✅ Fix: Pass the full task object to toggleTaskDone
+      // ✅ Toggle the task completion status
       final updatedTask = await taskProvider.toggleTaskDone(task);
 
       // ✅ Refresh DataProvider
@@ -572,7 +585,13 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
       // ✅ Update TaskProvider with fresh data
       taskProvider.setTasks(dataProvider.tasks);
 
+      // ✅ CRITICAL FIX: Force a rebuild of the UI
       if (mounted) {
+        setState(() {
+          // This will rebuild the widget tree with the updated task list
+          // and remove the dismissed widget from the tree
+        });
+
         // Show success message
         final message = updatedTask.isDone
             ? (task.type == TaskType.assignment
@@ -592,6 +611,8 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
     } catch (e) {
       if (mounted) {
         _showSnackBar('❌ Error updating task status');
+        // ✅ Also rebuild on error to remove the dismissed widget
+        setState(() {});
       }
       debugPrint('❌ Toggle completion error: $e');
     }
@@ -635,6 +656,7 @@ class _TaskManagerPageState extends State<TaskManagerPage> with SingleTickerProv
       await _notificationHelper.cancelTaskNotifications(task.id!);
 
       if (mounted) {
+        setState(() {});
         _showSnackBar('Task "${task.displayTitle}" deleted');
       }
     } catch (e) {

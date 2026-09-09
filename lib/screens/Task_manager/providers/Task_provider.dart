@@ -373,40 +373,67 @@ class TaskProvider extends ChangeNotifier {
     }
   }
 
+  /// ✅ FIXED: Handle null values properly and ensure task exists
   Future<Task> toggleTaskDone(Task task) async {
     _isLoading = true;
     _error = null;
     notifyListeners();
+
     try {
       final user = _firebaseService.currentUser;
-      if (user == null) throw Exception('User not authenticated');
+      if (user == null) {
+        throw Exception('User not authenticated');
+      }
+
+      // ✅ Check if task has an ID
       if (task.id == null || task.id!.isEmpty) {
         throw Exception('Task ID is required');
       }
-      final updatedTask = task.toggleDone();
+
+      // ✅ Get the current task from the list to ensure we have the latest data
+      final existingTask = _tasks.firstWhere(
+            (t) => t.id == task.id,
+        orElse: () => task, // Fallback to the provided task if not found
+      );
+
+      // ✅ Toggle the completion status
+      final updatedTask = existingTask.toggleDone();
+
+      // ✅ Prepare update data with null safety
       final Map<String, dynamic> updateData = {
         'isDone': updatedTask.isDone,
         'updatedAt': Timestamp.fromDate(updatedTask.updatedAt),
       };
+
+      // ✅ Handle completedAt with null safety
       if (updatedTask.completedAt != null) {
         updateData['completedAt'] = Timestamp.fromDate(updatedTask.completedAt!);
       } else {
         updateData['completedAt'] = null;
       }
+
+      // ✅ Update in Firestore
       await _getTasksCollection().doc(task.id!).update(updateData);
+
+      // ✅ Update local list
       final index = _tasks.indexWhere((t) => t.id == task.id);
       if (index != -1) {
         _tasks[index] = updatedTask;
       } else {
+        // If task not found in list, add it
         _tasks.insert(0, updatedTask);
       }
+
       _isLoading = false;
       notifyListeners();
+
       return updatedTask;
+
     } catch (e) {
       _isLoading = false;
       _error = 'Failed to toggle task: ${e.toString()}';
       notifyListeners();
+      debugPrint('❌ Toggle task error: $e');
       rethrow;
     }
   }
@@ -418,6 +445,12 @@ class TaskProvider extends ChangeNotifier {
     try {
       final user = _firebaseService.currentUser;
       if (user == null) throw Exception('User not authenticated');
+
+      // ✅ Check if taskId is valid
+      if (taskId.isEmpty) {
+        throw Exception('Task ID is required');
+      }
+
       await _getTasksCollection().doc(taskId).delete();
       _tasks.removeWhere((t) => t.id == taskId);
       _isLoading = false;
@@ -446,7 +479,7 @@ class TaskProvider extends ChangeNotifier {
       }
       final batch = _firestore.batch();
       for (final instance in instancesToDelete) {
-        if (instance.id != null) {
+        if (instance.id != null && instance.id!.isNotEmpty) {
           batch.delete(_getTasksCollection().doc(instance.id!));
         }
       }
@@ -469,12 +502,21 @@ class TaskProvider extends ChangeNotifier {
     try {
       final user = _firebaseService.currentUser;
       if (user == null) throw Exception('User not authenticated');
+
+      // ✅ Filter out empty IDs
+      final validTaskIds = taskIds.where((id) => id.isNotEmpty).toList();
+      if (validTaskIds.isEmpty) {
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+
       final batch = _firestore.batch();
-      for (final taskId in taskIds) {
+      for (final taskId in validTaskIds) {
         batch.delete(_getTasksCollection().doc(taskId));
       }
       await batch.commit();
-      _tasks.removeWhere((t) => taskIds.contains(t.id));
+      _tasks.removeWhere((t) => validTaskIds.contains(t.id));
       _isLoading = false;
       notifyListeners();
     } catch (e) {
@@ -488,7 +530,10 @@ class TaskProvider extends ChangeNotifier {
   Future<void> archiveCompletedTasks() async {
     final completedTasks = _tasks.where((t) => t.isDone).toList();
     if (completedTasks.isEmpty) return;
-    final taskIds = completedTasks.map((t) => t.id!).toList();
+    final taskIds = completedTasks
+        .map((t) => t.id!)
+        .where((id) => id.isNotEmpty)
+        .toList();
     await deleteMultipleTasks(taskIds);
   }
 
@@ -497,24 +542,36 @@ class TaskProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
+      // ✅ Filter out empty IDs
+      final validTaskIds = taskIds.where((id) => id.isNotEmpty).toList();
+      if (validTaskIds.isEmpty) {
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+
       final batch = _firestore.batch();
       final now = DateTime.now();
-      for (final taskId in taskIds) {
+
+      for (final taskId in validTaskIds) {
         Task? task;
         try {
           task = _tasks.firstWhere((t) => t.id == taskId);
         } catch (_) {
           continue;
         }
-        final updatedTask = task.toggleDone();
-        final docRef = _getTasksCollection().doc(taskId);
-        batch.update(docRef, {
-          'isDone': true,
-          'completedAt': Timestamp.fromDate(now),
-          'updatedAt': Timestamp.fromDate(now),
-        });
-        final index = _tasks.indexWhere((t) => t.id == taskId);
-        if (index != -1) _tasks[index] = updatedTask;
+
+        if (task != null) {
+          final updatedTask = task.toggleDone();
+          final docRef = _getTasksCollection().doc(taskId);
+          batch.update(docRef, {
+            'isDone': true,
+            'completedAt': Timestamp.fromDate(now),
+            'updatedAt': Timestamp.fromDate(now),
+          });
+          final index = _tasks.indexWhere((t) => t.id == taskId);
+          if (index != -1) _tasks[index] = updatedTask;
+        }
       }
       await batch.commit();
       _isLoading = false;
@@ -532,23 +589,34 @@ class TaskProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
+      // ✅ Filter out empty IDs
+      final validTaskIds = taskIds.where((id) => id.isNotEmpty).toList();
+      if (validTaskIds.isEmpty) {
+        _isLoading = false;
+        notifyListeners();
+        return;
+      }
+
       final batch = _firestore.batch();
-      for (final taskId in taskIds) {
+      for (final taskId in validTaskIds) {
         Task? task;
         try {
           task = _tasks.firstWhere((t) => t.id == taskId);
         } catch (_) {
           continue;
         }
-        final updatedTask = task.toggleDone();
-        final docRef = _getTasksCollection().doc(taskId);
-        batch.update(docRef, {
-          'isDone': false,
-          'completedAt': null,
-          'updatedAt': Timestamp.fromDate(DateTime.now()),
-        });
-        final index = _tasks.indexWhere((t) => t.id == taskId);
-        if (index != -1) _tasks[index] = updatedTask;
+
+        if (task != null) {
+          final updatedTask = task.toggleDone();
+          final docRef = _getTasksCollection().doc(taskId);
+          batch.update(docRef, {
+            'isDone': false,
+            'completedAt': null,
+            'updatedAt': Timestamp.fromDate(DateTime.now()),
+          });
+          final index = _tasks.indexWhere((t) => t.id == taskId);
+          if (index != -1) _tasks[index] = updatedTask;
+        }
       }
       await batch.commit();
       _isLoading = false;
@@ -562,6 +630,7 @@ class TaskProvider extends ChangeNotifier {
   }
 
   Task? getTaskById(String id) {
+    if (id.isEmpty) return null;
     try {
       return _tasks.firstWhere((t) => t.id == id);
     } catch (_) {
@@ -570,10 +639,12 @@ class TaskProvider extends ChangeNotifier {
   }
 
   List<Task> getTasksByRecurringGroup(String recurringGroupId) {
+    if (recurringGroupId.isEmpty) return [];
     return _tasks.where((t) => t.recurringGroupId == recurringGroupId).toList();
   }
 
   Task? getRecurringParent(String recurringGroupId) {
+    if (recurringGroupId.isEmpty) return null;
     try {
       return _tasks.firstWhere(
               (t) => t.recurringGroupId == recurringGroupId && t.isRecurringParent);
