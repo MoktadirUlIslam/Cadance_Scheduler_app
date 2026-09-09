@@ -11,7 +11,6 @@ import '../models/taskmanager_model.dart';
 import '../screens/Task_manager/services/task_notification_helper.dart';
 import '../services/ActivityTrackerService.dart';
 
-// ==================== DATA PROVIDER ====================
 
 class DataProvider extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
