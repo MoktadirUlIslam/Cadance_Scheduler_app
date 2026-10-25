@@ -1,282 +1,349 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
 import '../models/calendar_models.dart';
 
-// ✅ TOP-LEVEL FUNCTION - MUST be outside the class (REQUIRED for Android)
 @pragma('vm:entry-point')
 void onBackgroundNotificationResponse(NotificationResponse response) {
-  print('📲 Background notification tapped: ${response.payload}');
-  // Handle background notification here
+  // Handles notification actions configured for background execution.
+  // This does not run task auto-completion checks.
+  debugPrint('Background notification response: ${response.payload}');
 }
 
 class NotificationService {
-  static NotificationService? _instance;
-
-  factory NotificationService() {
-    _instance ??= NotificationService._internal();
-    return _instance!;
-  }
-
-  static NotificationService get instance {
-    _instance ??= NotificationService._internal();
-    return _instance!;
-  }
-
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  static final NotificationService _instance =
+  NotificationService._internal();
+
+  factory NotificationService() => _instance;
+
+  static NotificationService get instance => _instance;
+
+  final FlutterLocalNotificationsPlugin _notifications =
+  FlutterLocalNotificationsPlugin();
+
   bool _isInitialized = false;
+  Future<void>? _initializing;
+
+  static const String _calendarPrefix = 'calendar_event:';
+
+  bool get isInitialized => _isInitialized;
+
+  tz.Location get _dhaka => tz.getLocation('Asia/Dhaka');
+
+  int _normalizeId(int id) => id & 0x7fffffff;
+
+  // Stable across app launches.
+  // Calendar IDs occupy the upper half of the positive 31-bit range.
+  int _calendarNotificationId(String eventId) {
+    int hash = 0x811c9dc5;
+
+    for (final unit in eventId.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0xffffffff;
+    }
+
+    return 0x40000000 | (hash & 0x3fffffff);
+  }
 
   // ==================== INITIALIZATION ====================
 
   Future<void> initialize() async {
     if (_isInitialized) return;
 
+    final existing = _initializing;
+    if (existing != null) {
+      await existing;
+      return;
+    }
+
+    final initialization = _initializeInternal();
+    _initializing = initialization;
+
     try {
-      tz_data.initializeTimeZones();
-
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const iosSettings = DarwinInitializationSettings(
-        requestAlertPermission: true,
-        requestBadgePermission: true,
-        requestSoundPermission: true,
-      );
-
-      const settings = InitializationSettings(
-        android: androidSettings,
-        iOS: iosSettings,
-      );
-
-      // ✅ CRITICAL FIX: Use top-level function, NOT static method
-      await _notifications.initialize(
-        settings,
-        onDidReceiveNotificationResponse: _onNotificationResponse,
-        onDidReceiveBackgroundNotificationResponse: onBackgroundNotificationResponse,
-      );
-
-      await _createNotificationChannels();
-      await _requestIosPermissions();
-
-      _isInitialized = true;
-      print('✅ NotificationService initialized successfully');
-    } catch (e) {
-      print('❌ Error initializing NotificationService: $e');
-      rethrow;
+      await initialization;
+    } finally {
+      _initializing = null;
     }
   }
 
-  // ==================== CHANNEL CREATION ====================
+  Future<void> _initializeInternal() async {
+    tz_data.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('Asia/Dhaka'));
+
+    // Uses the resource already declared in your manifest.
+    // A dedicated monochrome drawable is preferable for production.
+    const androidSettings =
+    AndroidInitializationSettings('@mipmap/launcher_icon');
+
+    // Ask permission later, from an explicit user action.
+    const iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
+
+    const settings = InitializationSettings(
+      android: androidSettings,
+      iOS: iosSettings,
+    );
+
+    await _notifications.initialize(
+      settings,
+      onDidReceiveNotificationResponse: _onNotificationResponse,
+      onDidReceiveBackgroundNotificationResponse:
+      onBackgroundNotificationResponse,
+    );
+
+    await _createNotificationChannels();
+
+    _isInitialized = true;
+    debugPrint('NotificationService initialized');
+  }
 
   Future<void> _createNotificationChannels() async {
-    try {
-      final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-      >();
+    final android = _notifications
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
 
-      if (androidPlugin == null) {
-        print('⚠️ Android plugin not available');
-        return;
-      }
+    if (android == null) return;
 
-      const taskChannel = AndroidNotificationChannel(
+    const channels = <AndroidNotificationChannel>[
+      AndroidNotificationChannel(
         'task_channel',
         'Task Reminders',
-        description: 'Reminders for your tasks',
+        description: 'Reminders for tasks and events',
         importance: Importance.high,
-        enableVibration: true,
         playSound: true,
-        showBadge: true,
-      );
-      await androidPlugin.createNotificationChannel(taskChannel);
-
-      const summaryChannel = AndroidNotificationChannel(
+        enableVibration: true,
+      ),
+      AndroidNotificationChannel(
         'daily_summary_channel',
         'Daily Summary',
-        description: 'Daily summary of your tasks',
+        description: 'Task summaries',
         importance: Importance.defaultImportance,
-        enableVibration: true,
-        playSound: true,
-        showBadge: true,
-      );
-      await androidPlugin.createNotificationChannel(summaryChannel);
-
-      const overdueChannel = AndroidNotificationChannel(
+      ),
+      AndroidNotificationChannel(
         'overdue_channel',
         'Overdue Reminders',
         description: 'Reminders for overdue tasks',
         importance: Importance.high,
-        enableVibration: true,
-        playSound: true,
-        showBadge: true,
-      );
-      await androidPlugin.createNotificationChannel(overdueChannel);
-
-      const autoCompleteChannel = AndroidNotificationChannel(
+      ),
+      AndroidNotificationChannel(
         'autocomplete_channel',
         'Auto-Complete',
-        description: 'Tasks auto-completed by the system',
+        description: 'Task completion notifications',
         importance: Importance.defaultImportance,
-        enableVibration: true,
-        playSound: true,
-        showBadge: true,
-      );
-      await androidPlugin.createNotificationChannel(autoCompleteChannel);
-
-      const extensionChannel = AndroidNotificationChannel(
+      ),
+      AndroidNotificationChannel(
         'extension_channel',
         'Deadline Extensions',
         description: 'Deadline extension notifications',
         importance: Importance.high,
-        enableVibration: true,
-        playSound: true,
-        showBadge: true,
-      );
-      await androidPlugin.createNotificationChannel(extensionChannel);
+      ),
+    ];
 
-      print('✅ Created all notification channels');
-    } catch (e) {
-      print('❌ Error creating notification channels: $e');
+    for (final channel in channels) {
+      await android.createNotificationChannel(channel);
     }
   }
-
-  // ==================== IOS PERMISSIONS ====================
-
-  Future<void> _requestIosPermissions() async {
-    try {
-      final iosPlugin = _notifications.resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin
-      >();
-
-      if (iosPlugin != null) {
-        await iosPlugin.requestPermissions(
-          alert: true,
-          badge: true,
-          sound: true,
-        );
-        print('✅ iOS permissions requested');
-      }
-    } catch (e) {
-      print('⚠️ Error requesting iOS permissions: $e');
-    }
-  }
-
-  // ==================== NOTIFICATION RESPONSE HANDLERS ====================
 
   void _onNotificationResponse(NotificationResponse response) {
-    print('📲 Notification tapped: ${response.payload}');
+    debugPrint('Notification tapped: ${response.payload}');
+    // Add navigation handling here if required.
   }
 
   // ==================== PERMISSIONS ====================
 
   Future<bool> requestPermissions() async {
-    if (!_isInitialized) await initialize();
-    try {
-      final permissions = await _notifications
-          .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
-          ?.requestNotificationsPermission();
+    await initialize();
 
-      if (permissions == null) {
-        final ios = _notifications.resolvePlatformSpecificImplementation<
-            IOSFlutterLocalNotificationsPlugin
-        >();
-        if (ios != null) {
-          final granted = await ios.requestPermissions(
-            alert: true,
-            badge: true,
-            sound: true,
-          );
-          return granted ?? false;
-        }
-        return true;
+    final android = _notifications
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    if (android != null) {
+      final result = await android.requestNotificationsPermission();
+
+      return result ??
+          await android.areNotificationsEnabled() ??
+          false;
+    }
+
+    final ios = _notifications
+        .resolvePlatformSpecificImplementation<
+        IOSFlutterLocalNotificationsPlugin>();
+
+    if (ios != null) {
+      return await ios.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      ) ??
+          false;
+    }
+
+    return false;
+  }
+
+  /// Call from an "Enable reminders" button after explaining
+  /// why precise alarm timing is needed.
+  ///
+  /// The returned value describes notification permission,
+  /// not whether exact-alarm access was granted.
+  Future<bool> requestReminderPermissions() async {
+    final notificationsAllowed = await requestPermissions();
+
+    if (!notificationsAllowed) return false;
+
+    final android = _notifications
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    if (android != null) {
+      final exactAllowed =
+          await android.canScheduleExactNotifications() ?? false;
+
+      if (!exactAllowed) {
+        await android.requestExactAlarmsPermission();
       }
+    }
 
-      return permissions;
-    } catch (e) {
-      print('❌ Error requesting permissions: $e');
-      return false;
+    return notificationsAllowed;
+  }
+
+  Future<AndroidScheduleMode> _scheduleMode() async {
+    final android = _notifications
+        .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    final exactAllowed =
+        await android?.canScheduleExactNotifications() ?? false;
+
+    return exactAllowed
+        ? AndroidScheduleMode.exactAllowWhileIdle
+        : AndroidScheduleMode.inexactAllowWhileIdle;
+  }
+
+  // ==================== NOTIFICATION DETAILS ====================
+
+  String _channelForTitle(String title) {
+    final text = title.toLowerCase();
+
+    if (text.contains('overdue')) return 'overdue_channel';
+    if (text.contains('auto-completed')) return 'autocomplete_channel';
+    if (text.contains('deadline extended')) return 'extension_channel';
+
+    if (text.contains('daily summary') ||
+        text.contains('daily task summary')) {
+      return 'daily_summary_channel';
+    }
+
+    return 'task_channel';
+  }
+
+  String _channelName(String id) {
+    switch (id) {
+      case 'daily_summary_channel':
+        return 'Daily Summary';
+      case 'overdue_channel':
+        return 'Overdue Reminders';
+      case 'autocomplete_channel':
+        return 'Auto-Complete';
+      case 'extension_channel':
+        return 'Deadline Extensions';
+      default:
+        return 'Task Reminders';
     }
   }
 
-  // ==================== SCHEDULE TASK NOTIFICATION ====================
+  NotificationDetails _details({
+    required String title,
+    required String body,
+    required Color color,
+  }) {
+    final channelId = _channelForTitle(title);
+    final quietChannel = channelId == 'daily_summary_channel' ||
+        channelId == 'autocomplete_channel';
 
+    return NotificationDetails(
+      android: AndroidNotificationDetails(
+        channelId,
+        _channelName(channelId),
+        icon: '@mipmap/launcher_icon',
+        color: color,
+        importance: quietChannel
+            ? Importance.defaultImportance
+            : Importance.high,
+        priority: quietChannel ? Priority.defaultPriority : Priority.high,
+        category: AndroidNotificationCategory.reminder,
+        playSound: true,
+        enableVibration: true,
+        autoCancel: true,
+        styleInformation: BigTextStyleInformation(body),
+      ),
+      iOS: const DarwinNotificationDetails(
+        presentAlert: true,
+        presentBadge: true,
+        presentSound: true,
+      ),
+    );
+  }
+
+  // ==================== SCHEDULING ====================
+
+  /// Registers a ONE-TIME notification with the operating system.
+  ///
+  /// scheduledTime must represent the correct actual instant.
   Future<void> scheduleTaskNotification({
     required int notificationId,
     required String title,
     required String body,
     required DateTime scheduledTime,
     Color color = Colors.blue,
+    String? payload,
   }) async {
-    if (!_isInitialized) {
-      await initialize();
-    }
+    await initialize();
 
-    if (scheduledTime.isBefore(DateTime.now())) {
-      print('⏭️ Skipping notification scheduled in the past');
+    if (!scheduledTime.isAfter(DateTime.now())) {
+      debugPrint('Skipped past notification: $title');
       return;
     }
 
+    final scheduledDate = tz.TZDateTime.from(scheduledTime, _dhaka);
+    final mode = await _scheduleMode();
+    final id = _normalizeId(notificationId);
+
     try {
-      final scheduledDate = tz.TZDateTime.from(scheduledTime, tz.local);
-
-      String channelId = 'task_channel';
-      if (title.contains('Overdue')) {
-        channelId = 'overdue_channel';
-      } else if (title.contains('Auto-Completed')) {
-        channelId = 'autocomplete_channel';
-      } else if (title.contains('Deadline Extended')) {
-        channelId = 'extension_channel';
-      } else if (title.contains('Daily Summary')) {
-        channelId = 'daily_summary_channel';
-      }
-
-      final androidDetails = AndroidNotificationDetails(
-        channelId,
-        'Notifications',
-        channelDescription: 'Task notifications',
-        importance: Importance.high,
-        priority: Priority.high,
-        icon: '@mipmap/ic_launcher',
-        color: color,
-        category: AndroidNotificationCategory.reminder,
-        playSound: true,
-        enableVibration: true,
-        showWhen: true,
-        autoCancel: true,
-      );
-
-      final iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.timeSensitive,
-      );
-
-      final details = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
       await _notifications.zonedSchedule(
-        notificationId.abs(),
+        id,
         title,
         body,
         scheduledDate,
-        details,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
-        matchDateTimeComponents: DateTimeComponents.time,
+        _details(title: title, body: body, color: color),
+        androidScheduleMode: mode,
+        uiLocalNotificationDateInterpretation:
+        UILocalNotificationDateInterpretation.absoluteTime,
+        payload: payload,
+
+        // Deliberately omitted:
+        // matchDateTimeComponents
+        // This notification must not repeat every day.
       );
 
-      print('✅ Scheduled notification #${notificationId.abs()} at $scheduledTime');
-      print('   Title: $title');
-    } catch (e) {
-      print('❌ Error scheduling task notification: $e');
+      debugPrint(
+        'Scheduled #$id at $scheduledDate using $mode',
+      );
+    } catch (error, stackTrace) {
+      // Propagate failure so callers do not falsely count it as scheduled.
+      debugPrint('Notification scheduling failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      rethrow;
     }
   }
-
-  // ==================== SHOW IMMEDIATE NOTIFICATION ====================
 
   Future<void> showImmediateNotification({
     required int notificationId,
@@ -284,183 +351,109 @@ class NotificationService {
     required String body,
     Color color = Colors.blue,
   }) async {
-    if (!_isInitialized) await initialize();
+    await initialize();
 
-    try {
-      final androidDetails = AndroidNotificationDetails(
-        'task_channel',
-        'Task Reminders',
-        channelDescription: 'Reminders for your tasks',
-        importance: Importance.high,
-        priority: Priority.high,
-        icon: '@mipmap/ic_launcher',
-        color: color,
-        category: AndroidNotificationCategory.reminder,
-        playSound: true,
-        enableVibration: true,
-        autoCancel: true,
-      );
-
-      final iosDetails = DarwinNotificationDetails(
-        presentAlert: true,
-        presentBadge: true,
-        presentSound: true,
-        interruptionLevel: InterruptionLevel.timeSensitive,
-      );
-
-      final details = NotificationDetails(
-        android: androidDetails,
-        iOS: iosDetails,
-      );
-
-      await _notifications.show(
-        notificationId.abs(),
-        title,
-        body,
-        details,
-        payload: 'immediate_notification_$notificationId',
-      );
-
-      print('✅ Showed immediate notification: "$title"');
-    } catch (e) {
-      print('❌ Error showing immediate notification: $e');
-    }
-  }
-
-  // ==================== CANCEL NOTIFICATIONS ====================
-
-  Future<void> cancelNotification(int id) async {
-    if (!_isInitialized) await initialize();
-    await _notifications.cancel(id.abs());
-    print('✅ Cancelled notification: ${id.abs()}');
-  }
-
-  Future<void> cancelAllNotifications() async {
-    if (!_isInitialized) await initialize();
-    await _notifications.cancelAll();
-    print('✅ Cancelled all notifications');
-  }
-
-  // Add this method to the NotificationService class in notification_service.dart
-
-// ==================== SCHEDULE ALL EVENTS ====================
-
-  Future<void> scheduleAllEvents(List<CalendarEventModel> events) async {
-    if (!_isInitialized) await initialize();
-
-    // Cancel all existing notifications first to avoid duplicates
-    await cancelAllNotifications();
-
-    int notificationId = 1;
-    int scheduledCount = 0;
-    final now = DateTime.now();
-
-    for (var event in events) {
-      // Skip events that are in the past
-      if (event.date.isBefore(now) && !event.isAllDay) {
-        continue;
-      }
-
-      // For all-day events, schedule at 9 AM on the event day
-      DateTime scheduleTime;
-      if (event.isAllDay) {
-        scheduleTime = DateTime(
-          event.date.year,
-          event.date.month,
-          event.date.day,
-          9, 0, 0, // 9:00 AM
-        );
-      } else {
-        // For events with specific time, use the event's date and time
-        // Note: Your CalendarEventModel should have a time property
-        // If not, you'll need to adjust this
-        scheduleTime = event.date;
-      }
-
-      // Skip if scheduled time is in the past
-      if (scheduleTime.isBefore(now)) {
-        continue;
-      }
-
-      final title = '${_getCategoryEmoji(event.category)} ${event.title}';
-      final body = _buildEventNotificationBody(event);
-      final color = event.category.color;
-
-      await scheduleTaskNotification(
-        notificationId: notificationId,
-        title: title,
-        body: body,
-        scheduledTime: scheduleTime,
-        color: color,
-      );
-
-      notificationId++;
-      scheduledCount++;
-    }
-
-    print('✅ Scheduled $scheduledCount events');
-  }
-
-// ==================== SCHEDULE EVENT NOTIFICATION ====================
-
-  Future<void> scheduleEventNotification(CalendarEventModel event) async {
-    if (!_isInitialized) await initialize();
-
-    final now = DateTime.now();
-
-    // Skip if event is in the past
-    if (event.date.isBefore(now) && !event.isAllDay) {
-      return;
-    }
-
-    // For all-day events, schedule at 9 AM on the event day
-    DateTime scheduleTime;
-    if (event.isAllDay) {
-      scheduleTime = DateTime(
-        event.date.year,
-        event.date.month,
-        event.date.day,
-        9, 0, 0,
-      );
-    } else {
-      scheduleTime = event.date;
-    }
-
-    if (scheduleTime.isBefore(now)) {
-      return;
-    }
-
-    final title = '${_getCategoryEmoji(event.category)} ${event.title}';
-    final body = _buildEventNotificationBody(event);
-    final color = event.category.color;
-
-    final notificationId = event.id is int
-        ? event.id as int
-        : DateTime.now().millisecondsSinceEpoch.abs();
-
-    await scheduleTaskNotification(
-      notificationId: notificationId,
-      title: title,
-      body: body,
-      scheduledTime: scheduleTime,
-      color: color,
+    await _notifications.show(
+      _normalizeId(notificationId),
+      title,
+      body,
+      _details(title: title, body: body, color: color),
+      payload: 'immediate_notification:$notificationId',
     );
   }
 
-  // ==================== GET PENDING NOTIFICATIONS ====================
+  // ==================== CANCELLATION ====================
 
-  Future<List<PendingNotificationRequest>> getPendingNotifications() async {
-    if (!_isInitialized) await initialize();
-    return await _notifications.pendingNotificationRequests();
+  Future<void> cancelNotification(int id) async {
+    await initialize();
+    await _notifications.cancel(_normalizeId(id));
+  }
+
+  /// Explicit global cleanup only, such as logout.
+  /// Do not call when refreshing calendar events.
+  Future<void> cancelAllNotifications() async {
+    await initialize();
+    await _notifications.cancelAll();
+  }
+
+  Future<List<PendingNotificationRequest>>
+  getPendingNotifications() async {
+    await initialize();
+    return _notifications.pendingNotificationRequests();
   }
 
   Future<bool> isNotificationScheduled(int notificationId) async {
-    if (!_isInitialized) await initialize();
     final pending = await getPendingNotifications();
-    return pending.any((p) => p.id == notificationId.abs());
+    final id = _normalizeId(notificationId);
+
+    return pending.any((notification) => notification.id == id);
   }
 
-  // ==================== HELPERS ====================
+  // ==================== CALENDAR EVENTS ====================
+
+  DateTime _eventReminderTime(CalendarEventModel event) {
+    if (event.isAllDay) {
+      return tz.TZDateTime(
+        _dhaka,
+        event.date.year,
+        event.date.month,
+        event.date.day,
+        9,
+      );
+    }
+
+    // Must already contain the event's correct date and time.
+    return event.date;
+  }
+
+  /// Supply the COMPLETE current event list, not a filtered subset.
+  /// Only calendar-owned pending notifications are replaced.
+  Future<void> scheduleAllEvents(
+      List<CalendarEventModel> events,
+      ) async {
+    await initialize();
+
+    final pending = await getPendingNotifications();
+
+    for (final notification in pending) {
+      if (notification.payload?.startsWith(_calendarPrefix) ?? false) {
+        await cancelNotification(notification.id);
+      }
+    }
+
+    for (final event in events) {
+      await scheduleEventNotification(event);
+    }
+  }
+
+  Future<void> scheduleEventNotification(
+      CalendarEventModel event,
+      ) async {
+    await initialize();
+
+    final eventId = event.id.toString();
+    final id = _calendarNotificationId(eventId);
+
+    // Remove a previous reminder if the event time changed.
+    await cancelNotification(id);
+
+    final scheduledTime = _eventReminderTime(event);
+
+    if (!scheduledTime.isAfter(DateTime.now())) return;
+
+    await scheduleTaskNotification(
+      notificationId: id,
+      title: '${_getCategoryEmoji(event.category)} ${event.title}',
+      body: _buildEventNotificationBody(event),
+      scheduledTime: scheduledTime,
+      color: event.category.color,
+      payload: '$_calendarPrefix$eventId',
+    );
+  }
+
+  Future<void> cancelEventNotification(String eventId) async {
+    await cancelNotification(_calendarNotificationId(eventId));
+  }
 
   String _buildEventNotificationBody(CalendarEventModel event) {
     final buffer = StringBuffer();
@@ -471,11 +464,11 @@ class NotificationService {
       buffer.writeln('⏰ ${event.formattedTimeRange}');
     }
 
-    if (event.location != null && event.location!.isNotEmpty) {
+    if (event.location?.isNotEmpty ?? false) {
       buffer.writeln('📍 ${event.location}');
     }
 
-    if (event.description != null && event.description!.isNotEmpty) {
+    if (event.description?.isNotEmpty ?? false) {
       buffer.writeln('📝 ${event.description}');
     }
 
@@ -484,22 +477,24 @@ class NotificationService {
     return buffer.toString();
   }
 
-
-
   String _getCategoryEmoji(EventCategory category) {
     switch (category) {
-      case EventCategory.holiday: return '🏖️';
-      case EventCategory.birthday: return '🎂';
-      case EventCategory.exam: return '📚';
-      case EventCategory.meeting: return '👥';
-      case EventCategory.appointment: return '📋';
-      case EventCategory.celebration: return '🎉';
-      case EventCategory.travel: return '✈️';
-      case EventCategory.custom: return '📌';
+      case EventCategory.holiday:
+        return '🏖️';
+      case EventCategory.birthday:
+        return '🎂';
+      case EventCategory.exam:
+        return '📚';
+      case EventCategory.meeting:
+        return '👥';
+      case EventCategory.appointment:
+        return '📋';
+      case EventCategory.celebration:
+        return '🎉';
+      case EventCategory.travel:
+        return '✈️';
+      case EventCategory.custom:
+        return '📌';
     }
   }
-
-  // ==================== GETTERS ====================
-
-  bool get isInitialized => _isInitialized;
 }

@@ -22,16 +22,18 @@ class FocusQuality extends StatelessWidget {
     final totalFocusMinutes = dataProvider.grandTotalFocusMinutes;
     final streak = dataProvider.streak;
     final longestStreak = dataProvider.longestStreak;
-    final totalTasks = dataProvider.totalTasksDone;
-    final totalCompleted = dataProvider.totalClassesDone +
-        dataProvider.totalAssignmentsDone +
-        dataProvider.totalLabReportsDone +
-        dataProvider.totalExamsDone +
-        dataProvider.totalOthersDone;
 
-    // Calculate SMART metrics
-    final completionRate = totalTasks > 0
-        ? ((totalCompleted / totalTasks) * 100).round()
+    //use one task collection for both counts
+
+    final tasks = dataProvider.tasks;
+    final totalTasks = tasks.length;
+    final totalCompleted = tasks.where((tasks) => tasks.isDone).length;
+
+    // Completed tasks are a subset of total tasks,
+    // so this cannot exceed 100
+
+    final int completionRate = totalTasks > 0
+    ? ((totalCompleted / totalTasks) * 100).round()
         : 0;
 
     // 1️⃣ FOCUS EFFICIENCY SCORE - How well you convert time into completed tasks

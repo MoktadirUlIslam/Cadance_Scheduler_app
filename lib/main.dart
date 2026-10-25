@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
+
 import 'package:pomodoro/core/data_provider.dart';
 import 'package:pomodoro/providers/ThemeProvider.dart';
 import 'package:pomodoro/providers/UserAuthProvider.dart';
@@ -14,45 +16,88 @@ import 'package:pomodoro/screens/Profile/providers/profile_provider.dart';
 import 'package:pomodoro/screens/Task_manager/providers/Task_provider.dart';
 import 'package:pomodoro/services/ActivityTrackerService.dart';
 import 'package:pomodoro/services/firebase_options.dart';
-import 'package:provider/provider.dart';
-import 'routes/app_routes.dart'; // ✅ Import AppRoutes
+import 'package:pomodoro/services/notification_service.dart';
 
-void main() async {
+import 'routes/app_routes.dart';
+
+bool get _supportsLocalNotifications {
+  if (kIsWeb) return false;
+
+  return defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Initialize Firebase before creating providers that use it.
   try {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+  } catch (error, stackTrace) {
+    debugPrint('Firebase initialization failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
 
-    // Enable Firestore persistence for offline support
+    // Do not launch Firebase-dependent providers without Firebase.
+    runApp(const _StartupErrorApp());
+    return;
+  }
+
+  // Configure persistence separately from Firebase initialization.
+  try {
     FirebaseFirestore.instance.settings = const Settings(
       persistenceEnabled: true,
       cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
     );
 
-    // Only set persistence on web platforms
     if (kIsWeb) {
-      await FirebaseAuth.instance.setPersistence(Persistence.LOCAL);
+      await FirebaseAuth.instance.setPersistence(
+        Persistence.LOCAL,
+      );
     }
+  } catch (error, stackTrace) {
+    debugPrint('Persistence configuration failed: $error');
+    debugPrintStack(stackTrace: stackTrace);
+  }
 
-    print('✅ Firebase initialized successfully');
-
-  } catch (e) {
-    print('⚠️ Firebase initialization error: $e');
+  // Sets up timezones, notification channels, and callbacks.
+  // The updated NotificationService does not request permissions here.
+  if (_supportsLocalNotifications) {
+    try {
+      await NotificationService.instance.initialize();
+      debugPrint('Notification service initialized');
+    } catch (error, stackTrace) {
+      // Notification failure should not prevent app startup.
+      debugPrint('Notification initialization failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
   }
 
   runApp(
     MultiProvider(
       providers: [
-        // Order matters - DataProvider before UserAuthProvider
-        ChangeNotifierProvider(create: (_) => DataProvider()),
-        ChangeNotifierProvider(create: (_) => UserAuthProvider()),
-        ChangeNotifierProvider(create: (_) => ThemeProvider()),
-        ChangeNotifierProvider(create: (_) => TimerProvider()),
-        ChangeNotifierProvider(create: (_) => EventProvider()),
-        ChangeNotifierProvider(create: (_) => TaskProvider()),
-        ChangeNotifierProvider(create: (_) => ProfileProvider()),
+        ChangeNotifierProvider(
+          create: (_) => DataProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => UserAuthProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => ThemeProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => TimerProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => EventProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => TaskProvider(),
+        ),
+        ChangeNotifierProvider(
+          create: (_) => ProfileProvider(),
+        ),
         Provider<ActivityTrackerService>(
           create: (_) => ActivityTrackerService(),
         ),
@@ -69,14 +114,17 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+class _MyAppState extends State<MyApp>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addObserver(this);
 
-    // Initialize providers after widget tree is built
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
       _initializeProviders();
     });
   }
@@ -90,7 +138,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _trackAppUsage();
+      _recordActivityIfAuthenticated();
     }
   }
 
@@ -99,33 +147,28 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       final authProvider = context.read<UserAuthProvider>();
       final dataProvider = context.read<DataProvider>();
 
-      // Initialize UserAuthProvider with DataProvider reference
       authProvider.initialize(dataProvider);
 
-      print('✅ Providers initialized successfully');
-    } catch (e) {
-      print('❌ Error initializing providers: $e');
+      debugPrint('Providers initialized');
+    } catch (error, stackTrace) {
+      debugPrint('Provider initialization failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 
-  void _trackAppUsage() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _recordActivityIfAuthenticated();
-    });
-  }
-
   Future<void> _recordActivityIfAuthenticated() async {
-    try {
-      if (!mounted) return;
+    if (!mounted) return;
 
+    try {
       final authProvider = context.read<UserAuthProvider>();
-      if (authProvider.isAuthenticated) {
-        final dataProvider = context.read<DataProvider>();
-        await dataProvider.recordActivity();
-      }
-    } catch (e) {
-      // Silent fail - app usage tracking is non-critical
-      print('⚠️ Activity tracking error: $e');
+
+      if (!authProvider.isAuthenticated) return;
+
+      final dataProvider = context.read<DataProvider>();
+      await dataProvider.recordActivity();
+    } catch (error) {
+      // Activity tracking is non-critical.
+      debugPrint('Activity tracking failed: $error');
     }
   }
 
@@ -134,7 +177,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     return Consumer<ThemeProvider>(
       builder: (context, themeProvider, child) {
         return MaterialApp(
-          title: 'Cadance',
+          title: 'Cadence',
           theme: ThemeData(
             primarySwatch: Colors.blue,
             scaffoldBackgroundColor: Colors.white,
@@ -158,13 +201,37 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             fontFamily: 'Roboto',
           ),
           themeMode: themeProvider.themeMode,
-          // ✅ Use routes for navigation
           initialRoute: AppRoutes.splash,
           routes: AppRoutes.routes,
           onGenerateRoute: AppRoutes.onGenerateRoute,
           debugShowCheckedModeBanner: false,
         );
       },
+    );
+  }
+}
+
+class _StartupErrorApp extends StatelessWidget {
+  const _StartupErrorApp();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Text(
+                'Cadence could not start.\n'
+                    'Please close the app and try again.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

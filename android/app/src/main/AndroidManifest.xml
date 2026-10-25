@@ -1,31 +1,28 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.pomodoro">
 
-    <!-- ─── BASIC PERMISSIONS ─── -->
+    <!-- Basic -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- ─── NOTIFICATION PERMISSIONS (REQUIRED) ─── -->
+    <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- User-granted exact alarm access -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!-- Restore scheduled notifications after reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <!-- ─── OVERLAY PERMISSIONS ─── -->
+    <!-- Existing overlay functionality -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.SYSTEM_OVERLAY_WINDOW" />
 
-    <!-- ─── SCREEN & DISPLAY PERMISSIONS ─── -->
+    <!-- Existing audio / service functionality -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
-    <uses-permission android:name="android.permission.KEEP_SCREEN_ON" />
-
-    <!-- ─── AUDIO PERMISSIONS ─── -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-
-    <!-- ─── FOREGROUND SERVICE PERMISSIONS ─── -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <application
         android:label="Cadence"
@@ -35,32 +32,29 @@
         android:hardwareAccelerated="true"
         android:largeHeap="true">
 
-        <!-- Google Sign-In -->
         <meta-data
             android:name="com.google.android.gms.version"
             android:value="@integer/google_play_services_version" />
 
-        <!-- ─── NOTIFICATION CHANNELS ─── -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="task_channel" />
 
-        <!-- ─── NOTIFICATION RECEIVERS (REQUIRED) ─── -->
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
-            android:exported="true" />
+            android:exported="false" />
 
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
             </intent-filter>
         </receiver>
 
-        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -82,9 +76,14 @@
             </intent-filter>
         </activity>
 
-        <!-- ─── FOREGROUND SERVICE FOR OVERLAY ─── -->
+        <!--
+          Preserved from your existing app.
+          mediaProjection is valid only for an actual screen-capture flow.
+          It is NOT needed to deliver scheduled local notifications.
+        -->
         <service
             android:name=".ForcedReturnOverlayService"
+            android:exported="false"
             android:foregroundServiceType="mediaProjection" />
 
         <meta-data

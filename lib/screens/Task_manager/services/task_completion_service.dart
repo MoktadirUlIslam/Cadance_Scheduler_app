@@ -1,5 +1,3 @@
-// lib/screens/TaskManager/services/task_completion_service.dart
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -193,59 +191,38 @@ class TaskCompletionService {
     }
   }
 
-  /// Check if a task should be auto-completed
   bool _shouldAutoComplete(Task task, DateTime now) {
-    // Already done? Skip
     if (task.isDone) return false;
 
-    // Convert current time to UTC for consistent comparison
-    final nowUtc = now.toUtc();
-
-    // Check based on task type
     switch (task.type) {
       case TaskType.classes:
-      // Classes: Auto-complete when endTime is passed
-        if (task.endTime != null) {
-          // Ensure both times are in UTC for comparison
-          final taskEndTimeUtc = task.endTime!.toUtc();
-          return nowUtc.isAfter(taskEndTimeUtc);
-        }
-        // If no endTime, use date + 23:59
-        final endOfDay = DateTime(
-          task.date.year,
-          task.date.month,
-          task.date.day,
-          23,
-          59,
-        ).toUtc();
-        return nowUtc.isAfter(endOfDay);
-
       case TaskType.exam:
-      // Exam: Auto-complete when endTime is passed (not startTime)
+        final nowUtc = now.toUtc();
+
         if (task.endTime != null) {
-          final taskEndTimeUtc = task.endTime!.toUtc();
-          return nowUtc.isAfter(taskEndTimeUtc);
+          final endTimeUtc = task.endTime!.toUtc();
+
+          // Complete only AFTER the actual end time.
+          return nowUtc.isAfter(endTimeUtc);
         }
-        // If no endTime, use date + 23:59
-        final endOfExamDay = DateTime(
+
+        // No end time: wait until midnight after the scheduled day
+        // in Bangladesh (UTC+6).
+        final nextMidnightBangladeshUtc = DateTime.utc(
           task.date.year,
           task.date.month,
-          task.date.day,
-          23,
-          59,
-        ).toUtc();
-        return nowUtc.isAfter(endOfExamDay);
+          task.date.day + 1,
+        ).subtract(const Duration(hours: 6));
 
-      case TaskType.assignment:
-      case TaskType.labReport:
-      case TaskType.others:
-      // These types should be extended, not auto-completed
-        return false;
+        return !nowUtc.isBefore(nextMidnightBangladeshUtc);
 
       default:
+      // Assignment, lab report, and others are not auto-completed.
         return false;
     }
   }
+
+
 
   /// Check if a task should have its deadline extended
   bool _shouldExtendDeadline(Task task, DateTime now) {
@@ -477,10 +454,9 @@ class TaskCompletionService {
   // GET BANGLADESH TIME
   // ============================================================
 
-  /// Get current Bangladesh Time (UTC+6)
-  DateTime getBangladeshTime() {
-    return DateTime.now().toUtc().add(const Duration(hours: 6));
-  }
+ DateTime getBangladeshTime(){
+    return DateTime.now().toUtc();
+ }
 
   // ============================================================
   // BATCH OPERATIONS

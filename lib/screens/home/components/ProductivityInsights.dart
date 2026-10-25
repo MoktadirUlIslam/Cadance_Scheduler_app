@@ -18,10 +18,12 @@ class ProductivityInsights extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalSessions = dataProvider.grandTotalTaskCount;
     final totalMinutes = dataProvider.grandTotalFocusMinutes;
     final streak = dataProvider.streak;
     final history = dataProvider.history;
+
+    final sessions = dataProvider.sessionHistory;
+    final totalSessions = sessions.length;
 
     // Calculate average daily focus
     final activeDays = history.where((stat) => stat.totalFocusMinutes > 0).length;
@@ -33,12 +35,11 @@ class ProductivityInsights extends StatelessWidget {
         : null;
 
     // Calculate completion rate
-    final completedSessions = dataProvider.sessionHistory
-        .where((s) => s['isCompleted'] == true)
-        .length;
-    final completionRate = totalSessions > 0
-        ? (completedSessions / totalSessions) * 100
-        : 0;
+    final completedSessions = sessions.
+    where((sessions) => sessions['isCompleted']==true).length;
+
+    final double completionRate = totalSessions > 0
+    ?(completedSessions/ totalSessions) * 100.00 : 0.0 ;
 
     final insights = [
       _InsightItem(
